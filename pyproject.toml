@@ -4,4 +4,8 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "langchain>=0.3.27",
+    "prompt-toolkit>=3.0.52",
+    "pydantic>=2.11.9",
+]
