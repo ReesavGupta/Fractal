@@ -17,8 +17,6 @@ def main():
     if args.verbose:
         agent.config['verbose'] = True
 
-    agent = FractalAgent()
-
     agent.run()
 
 if __name__ == "__main__":

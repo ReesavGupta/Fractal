@@ -4,10 +4,6 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.completion import WordCompleter
 
-class sessionType(BaseModel): 
-    prompt: str
-
-    
 class FractalAgent:
     def __init__(self) -> None:
         self.config= {
@@ -120,7 +116,10 @@ class FractalAgent:
                 
         elif command == '/verbose':
             self.config['verbose'] = not self.config['verbose']
-            status = "enabled" if self.config['verbose'] else "disabled"
+            if self.config['verbose']:
+                status = "enabled"
+            else:
+                status = "disabled"
             print(f"Verbose mode {status}")
             
         elif command == '/mcp':
@@ -147,12 +146,19 @@ class FractalAgent:
                         print(f"{db} is not in MCP")
                 else:
                     print("Error: Invalid action. Use 'add' or 'remove'")
-                    
+
+        #####################################################################
+        # here if input does not start with "/" then we process here#
+        ##################################################################### 
         elif not command.startswith('/'):
+            # things i need to do here:- 
+            # check if there is a api key for the set llm or not
+            # if not ask the user to input their api key and store it securely
+            # use the api key for the agent invoke the agent with the user query
             if not self.config['llm']:
                 print("Warning: No LLM provider set. Use /llm <provider> to configure.")
                 return True
-                
+            
             print(f"\nProcessing with {self.config['llm'].upper()}...")
             if self.config['verbose']:
                 print(f"Prompt: {cmd}")
