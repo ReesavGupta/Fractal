@@ -2,10 +2,6 @@ import re
 import os
 from pathlib import Path
 
-def get_tool_list():
-    """This method returns the complete list of all the available tools for the agent"""
-    return [read_file, write_file, read_dir, edit_file, search_fs_using_regex ]
-
 def read_file(file_path: str) -> str:
     """Read and return the contents of the file specified in the file_path"""
     try:
@@ -174,7 +170,6 @@ def create_directory(dir_path: str) -> str:
         return f"Error: Permission denied to create directory '{dir_path}'"
     except Exception as e:
         return f"Error creating directory: {str(e)}"
-
 
 def delete_file(file_path: str) -> str:
     """Delete a file"""
