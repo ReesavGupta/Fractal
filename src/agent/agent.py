@@ -184,7 +184,7 @@ class CodingAgent:
             response = str(final_message)
         
         # Store in memory
-        self.memory.add_interaction(user_input, response)
+        self.memory.add_interaction(user_input, response) #type:ignore
         
         # Ensure response is always a string
         if isinstance(response, list):
@@ -206,7 +206,7 @@ class CodingAgent:
         else:
             response = str(final_message)
         
-        self.memory.add_interaction(user_input, response)
+        self.memory.add_interaction(user_input, response) #type:ignore
 
         # Ensure response is always a string
         if isinstance(response, list):
