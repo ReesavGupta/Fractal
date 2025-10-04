@@ -1,9 +1,8 @@
-from pydantic import BaseModel
 from prompt_toolkit.styles import Style
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.completion import WordCompleter
-from agent.agent import CodingAgent
+from agent import CodingAgent #type:ignore
 
 class FractalAgent:
     def __init__(self) -> None:
