@@ -23,17 +23,17 @@ def read_file(file_path: str) -> str:
         return f"Error reading the file: {str(e)}"
 
 def write_file(file_path: str, content: str) -> str:
-    """Write content to a file"""
+    """Write content to a file, creating it if it doesn't exist"""
     try:
         path = Path(file_path)
 
-        if not path.is_file():
-            return f"Error: '{file_path} is not a file"
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         
-        return f"Sucessfully wrote {len(content)} characters to {file_path}"
+        return f"Successfully wrote {len(content)} characters to '{file_path}'"
+    
     except PermissionError:
         return f"Error: Permission denied to write to file '{file_path}'"
     except Exception as e:
@@ -159,7 +159,6 @@ def search_fs_using_regex(dir_path: str, pattern: str, file_extension: str | Non
     except Exception as e:
         return f"Error searching files: {str(e)}"
     
-
 def create_directory(dir_path: str) -> str:
     """Create a new directory"""
     try:

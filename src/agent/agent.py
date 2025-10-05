@@ -34,7 +34,7 @@ class CodingAgent:
         ########################################################################## 
         # here we will first initialize the llm with the llm which the user has provided
         self._initialize_llm(llm, api_key)
-        
+        self._build_graph()
         # Build the agent graph
         # self._build_graph()
     def _initialize_llm(self, llm: str, api_key: Optional[str] = None):    
@@ -198,7 +198,7 @@ class CodingAgent:
         
         initial_state = IFractalState(messages=[HumanMessage(content=user_input)])
 
-        final_state = await self.graph.ainvoke(initial_state)
+        final_state = await self.graph.ainvoke(initial_state, {"recursion_limit": 100})
         final_message = final_state["messages"][-1]
         
         if isinstance(final_message, AIMessage):

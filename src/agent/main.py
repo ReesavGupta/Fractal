@@ -1,8 +1,13 @@
+import asyncio
 import sys
 import argparse
 from tui import FractalAgent
+from dotenv import load_dotenv
+# import nest_asyncio
 
-def main():
+load_dotenv()
+
+async def main():
     """Main entry point for the Fractal CLI Agent"""
     
     parser = argparse.ArgumentParser(
@@ -54,7 +59,8 @@ def main():
         print("Verbose mode enabled")
     
     try:
-        agent.run()
+        # asyncio 
+        await agent.run()
     except KeyboardInterrupt:
         print("\n\nSeeYa Space Cowboy!")
         sys.exit(0)
@@ -67,4 +73,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

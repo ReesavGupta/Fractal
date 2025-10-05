@@ -1,5 +1,6 @@
 from langchain_core.tools import tool
 from typing import Optional
+from langsmith import traceable
 from tools import (
     read_file,
     write_file,
@@ -18,6 +19,7 @@ def get_tool_list():
     """
     
     @tool
+    @traceable('tool', name="read_file_tool")
     def read_file_tool(file_path: str) -> str:
         """
         Read and return the contents of a file.
@@ -31,6 +33,7 @@ def get_tool_list():
         return read_file(file_path)
     
     @tool
+    @traceable('tool', name="write_file_tool")
     def write_file_tool(file_path: str, content: str) -> str:
         """
         Write content to a file. This will overwrite existing content.
@@ -45,6 +48,7 @@ def get_tool_list():
         return write_file(file_path, content)
     
     @tool
+    @traceable('tool', name="read_directory_tool")
     def read_directory_tool(dir_path: str, recursive: bool = False) -> str:
         """
         List all files and directories in a directory.
@@ -59,6 +63,7 @@ def get_tool_list():
         return read_dir(dir_path, recursive)
     
     @tool
+    @traceable('tool', name="edit_file_tool") 
     def edit_file_tool(file_path: str, old_text: str, new_text: str) -> str:
         """
         Edit a file by replacing old_text with new_text.
@@ -74,6 +79,7 @@ def get_tool_list():
         return edit_file(old_text, new_text, file_path)
     
     @tool
+    @traceable('tool', name="search_files_tool") 
     def search_files_tool(
         dir_path: str, 
         pattern: str, 
@@ -91,8 +97,9 @@ def get_tool_list():
             Search results showing matching files and lines
         """
         return search_fs_using_regex(dir_path, pattern, file_extension)
-    
+        
     @tool
+    @traceable('tool', name="create_dir_tool")
     def create_directory_tool(dir_path: str) -> str:
         """
         Create a new directory. Creates parent directories if needed.
@@ -106,6 +113,7 @@ def get_tool_list():
         return create_directory(dir_path)
     
     @tool
+    @traceable('tool', name="create_dir_tool")
     def delete_file_tool(file_path: str) -> str:
         """
         Delete a file.

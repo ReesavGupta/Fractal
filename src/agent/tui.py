@@ -3,6 +3,9 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.completion import WordCompleter
 from agent import CodingAgent #type:ignore
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class FractalAgent:
     def __init__(self) -> None:
@@ -112,7 +115,7 @@ class FractalAgent:
             print(f"Unexpected error: {str(e)}")
             return False
 
-    def handle_command(self, cmd):
+    async def handle_command(self, cmd):
         """Process user commands"""
         parts = cmd.strip().split()
         
@@ -246,7 +249,7 @@ class FractalAgent:
             try:
                 print(f"\nProcessing with {self.config['llm'].upper()}...\n")
                 if self.agent:
-                    response = self.agent.invoke(cmd)
+                    response = await self.agent.ainvoke(cmd)
                     print(f"\n{response}\n")
             except Exception as e:
                 print(f"\nError processing request: {str(e)}\n")
@@ -260,7 +263,7 @@ class FractalAgent:
             
         return True
 
-    def run(self):
+    async def run(self):
         """Main TUI loop"""
         self.setup_tui()
         self.print_banner()
@@ -272,12 +275,12 @@ class FractalAgent:
         try:
             while self.running:
                 try:
-                    user_input = self.session.prompt(
+                    user_input = await self.session.prompt_async(
                         HTML('<prompt>fractal ▶</prompt> '),
                     )
                     
                     if user_input.strip():
-                        self.running = self.handle_command(user_input)
+                        self.running = await self.handle_command(user_input)
                         
                 except KeyboardInterrupt:
                     print("\nUse /exit or /quit to exit Fractal")
