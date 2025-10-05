@@ -1,23 +1,11 @@
 import os
-from pydantic import BaseModel, Field
-from typing import Optional, Annotated, List, Literal, Dict
+from typing import Optional, Literal
 from utils import get_tool_list
-from memory import FractalMemory
 from langgraph.prebuilt import ToolNode
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
-from langgraph.graph.message import add_messages
-
-class IFractalState(BaseModel):
-    messages: Annotated[List[BaseMessage], add_messages]
-    # todo_task_list: Optional[Dict[str, bool]] = Field(default_factory=dict)
-    # current_task: Optional[str] = None
-    # code_context: Optional[str] = None
-    # error_count: int = 0
-    
-    class Config:
-        arbitrary_types_allowed = True
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from state import IFractalState
 
 class CodingAgent:
     def __init__(self, llm: str, api_key: Optional[str] = None, verbose: bool = False) -> None:
@@ -25,18 +13,22 @@ class CodingAgent:
         self.verbose = verbose
         self.client = None
         self.model_name = None
+        
         ##########################################################################
-        self.memory = FractalMemory()
         self.tools = get_tool_list()
+        # self.memory = FractalMemory()
+        ##########################################################################
+
         ##########################################################################
         self.graph = None
-        self.state = None
+        self.state: Optional[IFractalState] = IFractalState(messages=[])
         ########################################################################## 
+        
         # here we will first initialize the llm with the llm which the user has provided
-        self._initialize_llm(llm, api_key)
-        self._build_graph()
+        self._initialize_llm(llm, api_key)        
         # Build the agent graph
-        # self._build_graph()
+        self._build_graph()
+
     def _initialize_llm(self, llm: str, api_key: Optional[str] = None):    
         """Initialize the LLM client with tool binding"""
         if llm == "openai":
@@ -66,7 +58,7 @@ class CodingAgent:
         # binding with tools
         self.client_with_tools = self.client.bind_tools(self.tools)
         if self.verbose:
-            print(f"✓ Initialized {self.model_name} with {len(self.tools)} tools")
+            print(f"Initialized {self.model_name} with {len(self.tools)} tools")
         ####################################################################################################################
         
 
@@ -147,70 +139,30 @@ class CodingAgent:
 # GRAPH COMPILED
 ###########################################################################################################################################################
 ###########################################################################################################################################################
-
-    def invoke(self, user_input: str) -> str:
-        """
-        Process user input through the agent graph
-        
-        Args:
-            user_input: The user's query or command
-            
-        Returns:
-            The final response from the agent
-        """
-        if not self.graph:
-            raise RuntimeError("Agent graph not initialized")
-        
-        # Create initial state with user message
-        # initial_state = {
-        #     "messages": [HumanMessage(content=user_input)]
-        # }
-
-        initial_state = IFractalState(messages=[HumanMessage(content=user_input)])
-        
-        if self.verbose:
-            print(f"\n{'='*60}")
-            print(f"Processing: {user_input}")
-            print(f"{'='*60}")
-        
-        # yaha pe invoke karenge
-        final_state = self.graph.invoke(initial_state)
-        
-        final_message = final_state["messages"][-1]
-        
-        if isinstance(final_message, AIMessage):
-            response = final_message.content
-        else:
-            response = str(final_message)
-        
-        # Store in memory
-        self.memory.add_interaction(user_input, response) #type:ignore
-        
-        # Ensure response is always a string
-        if isinstance(response, list):
-            response = "\n".join(str(item) for item in response)
-        return response
-    
     async def ainvoke(self, user_input: str) -> str:
         """Async version of invoke"""
         if not self.graph:
             raise RuntimeError("Agent graph not initialized")
-        
-        initial_state = IFractalState(messages=[HumanMessage(content=user_input)])
 
-        final_state = await self.graph.ainvoke(initial_state, {"recursion_limit": 100})
+        if self.state is None:
+            raise RuntimeError("State for graph is not initialized")
+
+        self.state.add_message(HumanMessage(content=user_input))
+
+        final_state = await self.graph.ainvoke(self.state, {"recursion_limit": 100})
+
         final_message = final_state["messages"][-1]
         
         if isinstance(final_message, AIMessage):
+            self.state.add_message(final_message)
             response = final_message.content
         else:
             response = str(final_message)
         
-        self.memory.add_interaction(user_input, response) #type:ignore
-
         # Ensure response is always a string
         if isinstance(response, list):
             response = "\n".join(str(item) for item in response)
+
         return response
     
     def stream(self, user_input: str):
@@ -225,10 +177,13 @@ class CodingAgent:
         """
         if not self.graph:
             raise RuntimeError("Agent graph not initialized")
-        
-        initial_state = IFractalState(messages=[HumanMessage(content=user_input)])
-                    
-        for event in self.graph.stream(initial_state, stream_mode="values"):
+
+        if self.state is None:
+            raise RuntimeError("State is not initialized")
+
+        self.state.messages.append(HumanMessage(content=user_input))
+
+        for event in self.graph.stream(self.state, stream_mode="values"):
             if "messages" in event and event["messages"]:
                 last_message = event["messages"][-1]
                 if isinstance(last_message, AIMessage) and last_message.content:
@@ -236,10 +191,15 @@ class CodingAgent:
 
     def get_memory(self):
         """Get conversation memory"""
-        return self.memory.get_history()
+        return self.state.messages if self.state else []  
     
     def clear_memory(self):
         """Clear conversation memory"""
-        self.memory.clear()
-        if self.verbose:
-            print("✓ Memory cleared")
+        if self.state:
+            self.state.messages = []
+            self.state.todo_task_list = {}
+            self.state.mcp_state = {}
+            self.state.current_task = None
+            self.state.error_count = 0
+            if self.verbose:
+                print("History and state cleared")
