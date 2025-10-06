@@ -11,6 +11,13 @@ from tools import (
     delete_file
 )
 
+# global reference to rag service that tools can access
+_rag_service_ref = None
+
+def set_rag_service(rag_service):
+    """Set the global RAG service reference for tools to use"""
+    global _rag_service_ref
+    _rag_service_ref = rag_service
 
 def get_tool_list():
     """
@@ -113,7 +120,7 @@ def get_tool_list():
         return create_directory(dir_path)
     
     @tool
-    @traceable('tool', name="create_dir_tool")
+    @traceable('tool', name="delete_file_tool")
     def delete_file_tool(file_path: str) -> str:
         """
         Delete a file.
@@ -139,25 +146,24 @@ def get_tool_list():
         Returns:
             Relevant code snippets and explanations from the codebase
         """
-        if not hasattr(search_codebase_tool, '_rag_service') or not search_codebase_tool._rag_service:
+        if not _rag_service_ref:
             return "Error: RAG service not available. Please initialize the agent with RAG service."
         
-        rag_service = search_codebase_tool._rag_service
-        
         try:
-            results = rag_service.search(query, top_k=20)
+            results = _rag_service_ref.search(query, top_k=5)
             
             if not results:
                 return f"No relevant code found for query: '{query}'"
             
-            summary = rag_service.rerank(results, query)
+            summary = _rag_service_ref.rerank(results, query)
             
             response = f"RAG Search Results for '{query}':\n\n"
             response += f"Summary: {summary}\n\n"
             response += "Relevant Code Snippets:\n"
             
             for i, doc in enumerate(results, 1):
-                response += f"\n{i}. {doc.page_content[:200]}...\n"
+                source = doc.metadata.get('source_file', 'unknown')
+                response += f"\n{i}. From {source}:\n{doc.page_content}\n"
             
             return response
             

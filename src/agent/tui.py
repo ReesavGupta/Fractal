@@ -10,7 +10,7 @@ from rag_service.rag import RAGService
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from pydantic import SecretStr
 from langchain.chat_models import init_chat_model
-from utils import search_codebase_tool
+from utils import set_rag_service
 
 load_dotenv()
 
@@ -128,7 +128,7 @@ class FractalAgent:
 
             api_key = self.config['api_keys'].get(self.config['llm'])
 
-            # here we are initializing the rag service if it is not already initialized
+            # Initialize RAG service if not already done
             rag_service = None
             if not hasattr(self, 'rag_service') or not self.rag_service:
                 try:
@@ -148,20 +148,33 @@ class FractalAgent:
                             api_key=os.getenv("OPENAI_API_KEY")
                         )
                         
+                        project_path = os.getcwd()
+                        
                         self.rag_service = RAGService(
                             llm=temp_llm,
                             embedding_model=embedding_model,
-                            project_name=Path(os.getcwd()).name
+                            project_name=Path(project_path).name
                         )
                         
+                        # Check if index exists, if not do initial indexing
+                        index_file = Path(project_path) / ".fractal_index.json"
+                        if not index_file.exists():
+                            print("First time setup: Indexing codebase...")
+                            self.rag_service.index_codebase(project_path)
+                        else:
+                            print("Loading existing codebase index...")
+                            # Still rebuild retrievers with existing data
+                            self.rag_service._rebuild_retrievers()
+                        
                         rag_service = self.rag_service
-                        print("RAG service initialized successfully!")
+                        print("✓ RAG service initialized successfully!")
                 except Exception as e:
                     print(f"Warning: Could not initialize RAG service: {e}")
                     print("Agent will work without RAG capabilities.")
             else:
                 rag_service = self.rag_service
 
+            # Initialize the agent
             self.agent = CodingAgent(
                 llm=self.config['llm'],
                 api_key=api_key,
@@ -169,11 +182,9 @@ class FractalAgent:
                 rag_service=rag_service
             )
 
-            ####################################################################################################################
-            # Set RAG service reference in tools if it is initialized
-            ####################################################################################################################
+            # FIXED: Set RAG service reference globally before tools are created
             if rag_service:
-                search_codebase_tool._rag_service = rag_service
+                set_rag_service(rag_service)
 
             print(f"Agent initialized successfully!")
             return True
@@ -185,7 +196,7 @@ class FractalAgent:
         except Exception as e:
             print(f"Unexpected error: {str(e)}")
             return False
-
+        
     async def handle_command(self, cmd):
         """Process user commands"""
         parts = cmd.strip().split()

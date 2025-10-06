@@ -9,7 +9,7 @@ from state import IFractalState
 from rag_service.rag import RAGService
 
 class CodingAgent:
-    def __init__(self, llm: str, api_key: Optional[str] = None, verbose: bool = False, rag_service: RAGService = None) -> None:
+    def __init__(self, llm: str, api_key: Optional[str] = None, verbose: bool = False, rag_service: RAGService | None = None) -> None:
         self.llm_provider = llm
         self.verbose = verbose
         self.client = None
