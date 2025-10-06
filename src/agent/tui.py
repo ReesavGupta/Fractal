@@ -4,13 +4,13 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.completion import WordCompleter
-from agent import CodingAgent #type:ignore
+from src.agent.agent import CodingAgent #type:ignore
 from dotenv import load_dotenv
-from rag_service.rag import RAGService
+from src.rag_service.rag import RAGService
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from pydantic import SecretStr
 from langchain.chat_models import init_chat_model
-from utils import set_rag_service
+from src.agent.utils import set_rag_service
 
 load_dotenv()
 
@@ -35,7 +35,7 @@ class FractalAgent:
     def setup_tui(self):
         commands = WordCompleter([
             '/llm', '/verbose', '/mcp', '/config', '/clear', '/help', '/quit',
-            '/memory', '/export', '/session', '/apikey', '/embedkey',
+            '/session', '/apikey', '/embedkey',
             'openai', 'gemini', 'claude', 'postgresql', 'mongodb'
         ], ignore_case=True)
 
@@ -90,10 +90,6 @@ class FractalAgent:
 │ /apikey <provider> <key>  - Set API key for LLM provider    │
 |-------------------------------------------------------------|
 │ /embedkey <provider> <key> - Set API key for embedding model│
-|-------------------------------------------------------------|
-│ /export [file]     - Export conversation history            │
-|-------------------------------------------------------------|
-│ /session           - Show session statistics                │
 |-------------------------------------------------------------|
 │ /reembed           - Re-Index the project codebase          │
 |-------------------------------------------------------------|
@@ -254,30 +250,6 @@ class FractalAgent:
                 self.config['embedding_api_keys'][provider] = key
                 print(f"Embedding API key set for {provider}")
 
-
-        elif command == '/export':
-            if not self.agent:
-                print("No agent initialized.")
-            else:
-                filepath = parts[1] if len(parts) > 1 else "fractal_history.txt"
-                result = self.agent.memory.export_history(filepath)
-                print(f"{result}")
-
-
-        elif command == '/session':
-            if not self.agent:
-                print("No agent initialized.")
-            else:
-                summary = self.agent.memory.get_session_summary()
-                print("\nSession Summary:")
-                print("-" * 60)
-                print(f"Session Start: {summary['session_start'].strftime('%Y-%m-%d %H:%M:%S')}")
-                print(f"Duration: {summary['duration']}")
-                print(f"Total Interactions: {summary['total_interactions']}")
-                print(f"Context Window: {summary['context_window']}")
-                print(f"Max History: {summary['max_history']}")
-                print("-" * 60)
-
         elif command == '/llm':
             if len(parts) < 2:
                 print("Error: Please specify an LLM provider (openai, gemini, claude)")
@@ -314,7 +286,8 @@ class FractalAgent:
                         project_name=Path(project_path).name
                     )
 
-                self.agent.rag_service.reembed_changed_files(project_path)   
+                if self.agent.rag_service:
+                    self.agent.rag_service.reembed_changed_files(project_path)   
 
         elif command == '/mcp':
             if len(parts) < 3:
@@ -360,6 +333,10 @@ class FractalAgent:
                 print(f"\nProcessing with {self.config['llm'].upper()}...\n")
                 if self.agent:
                     response = await self.agent.ainvoke(cmd)
+                    # response = ""
+                    # async for token in self.agent.astream(cmd):
+                    #     await asyncio.sleep(10)
+                    #     print(str(token))
                     print(f"\n{response}\n")
             except Exception as e:
                 print(f"\nError processing request: {str(e)}\n")

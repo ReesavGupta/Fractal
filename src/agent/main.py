@@ -1,7 +1,7 @@
 import asyncio
 import sys
 import argparse
-from tui import FractalAgent
+from src.agent.tui import FractalAgent
 from dotenv import load_dotenv
 # import nest_asyncio
 
