@@ -16,7 +16,6 @@ class CodingAgent:
         
         ##########################################################################
         self.tools = get_tool_list()
-        # self.memory = FractalMemory()
         ##########################################################################
 
         ##########################################################################
@@ -165,9 +164,9 @@ class CodingAgent:
 
         return response
     
-    def stream(self, user_input: str):
+    async def astream(self, user_input: str):
         """
-        Stream the agent's response token by token
+        Asynchronously stream the agent's response token by token
         
         Args:
             user_input: The user's query or command
@@ -183,7 +182,7 @@ class CodingAgent:
 
         self.state.messages.append(HumanMessage(content=user_input))
 
-        for event in self.graph.stream(self.state, stream_mode="values"):
+        async for event in self.graph.astream(self.state, stream_mode="values"):
             if "messages" in event and event["messages"]:
                 last_message = event["messages"][-1]
                 if isinstance(last_message, AIMessage) and last_message.content:

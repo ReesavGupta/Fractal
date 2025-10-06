@@ -5,11 +5,17 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastembed>=0.7.3",
+    "google-genai>=1.41.0",
     "langchain>=0.3.27",
+    "langchain-community>=0.3.30",
+    "langchain-google-genai>=2.1.12",
     "langchain-openai>=0.3.34",
+    "langchain-qdrant>=0.2.1",
     "langgraph>=0.6.8",
     "nest-asyncio>=1.6.0",
     "prompt-toolkit>=3.0.52",
     "pydantic>=2.11.9",
     "python-dotenv>=1.1.1",
+    "rank-bm25>=0.2.2",
 ]

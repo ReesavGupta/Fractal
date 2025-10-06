@@ -12,7 +12,9 @@ class FractalAgent:
         self.config= {
             'llm' : None,
             'verbose': False,
-            'mcp': []
+            'mcp': [],
+            'api_keys': {},
+            'embedding_api_keys': {} 
         }
         self.session= None 
         self.running = True
@@ -22,7 +24,7 @@ class FractalAgent:
     def setup_tui(self):
         commands = WordCompleter([
             '/llm', '/verbose', '/mcp', '/config', '/clear', '/help', '/quit',
-            '/memory', '/export', '/session',
+            '/memory', '/export', '/session', '/apikey', '/embedkey',
             'openai', 'gemini', 'claude', 'postgresql', 'mongodb'
         ], ignore_case=True)
 
@@ -66,15 +68,26 @@ class FractalAgent:
 ├─────────────────────────────────────────────────────────────┤
 │ /llm <provider>    - Set LLM provider                       │
 │                      Options: openai, gemini, claude        │
+|-------------------------------------------------------------|
 │ /verbose           - Toggle verbose output                  │
+|-------------------------------------------------------------|
 │ /mcp <add|remove> <db> - Manage MCP databases               │
 │                      Options: postgresql, mongodb           │
+|-------------------------------------------------------------|
 │ /config            - Show current configuration             │
-│ /memory            - Show conversation history summary      │
+|-------------------------------------------------------------|
+│ /apikey <provider> <key>  - Set API key for LLM provider    │
+|-------------------------------------------------------------|
+│ /embedkey <provider> <key> - Set API key for embedding model│
+|-------------------------------------------------------------|
 │ /export [file]     - Export conversation history            │
+|-------------------------------------------------------------|
 │ /session           - Show session statistics                │
+|-------------------------------------------------------------|
 │ /clear             - Clear screen                           │
+|-------------------------------------------------------------|
 │ /help              - Show this help message                 │
+|-------------------------------------------------------------|
 │ /exit or /quit     - Exit Fractal                           │
 └─────────────────────────────────────────────────────────────┘
         """
@@ -100,8 +113,10 @@ class FractalAgent:
         try:
             print(f"\nInitializing {self.config['llm'].upper()} agent...")
 
+            api_key = self.config['api_keys'].get(self.config['llm'])
             self.agent = CodingAgent(
                 llm=self.config['llm'],
+                api_key=api_key,
                 verbose=self.config['verbose']
             )
             print(f"Agent initialized successfully!")
@@ -192,21 +207,26 @@ class FractalAgent:
                     print("Error: Invalid action. Use 'add' or 'remove'")
 
 
-        elif command == '/memory':
-            if not self.agent:
-                print("No agent initialized. Use /llm <provider> first.")
+        elif command == '/apikey':
+            if len(parts) < 3:
+                print("Usage: /apikey <provider> <key>")
             else:
-                history = self.agent.get_memory()
-                if not history:
-                    print("No conversation history yet.")
+                provider = parts[1].lower()
+                key = parts[2]
+                if provider not in ['openai', 'gemini', 'claude']:
+                    print("Error: Supported providers are openai, gemini, claude")
                 else:
-                    print(f"\nConversation History ({len(history)} interactions):")
-                    print("-" * 60)
-                    for i, interaction in enumerate(history[-10:], 1):
-                        print(f"\n{i}. User: {interaction['user'][:60]}...")
-                        print(f"   Agent: {interaction['agent'][:60]}...")
-                    if len(history) > 10:
-                        print(f"\n... and {len(history) - 10} more interactions")
+                    self.config['api_keys'][provider] = key
+                    print(f"API key set for {provider}")
+
+        elif command == '/embedkey':
+            if len(parts) < 3:
+                print("Usage: /embedkey <provider> <key>")
+            else:
+                provider = parts[1].lower()
+                key = parts[2]
+                self.config['embedding_api_keys'][provider] = key
+                print(f"Embedding API key set for {provider}")
 
 
         elif command == '/export':
