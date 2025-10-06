@@ -6,9 +6,10 @@ from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from state import IFractalState
+from rag_service.rag import RAGService
 
 class CodingAgent:
-    def __init__(self, llm: str, api_key: Optional[str] = None, verbose: bool = False) -> None:
+    def __init__(self, llm: str, api_key: Optional[str] = None, verbose: bool = False, rag_service: RAGService = None) -> None:
         self.llm_provider = llm
         self.verbose = verbose
         self.client = None
@@ -16,6 +17,7 @@ class CodingAgent:
         
         ##########################################################################
         self.tools = get_tool_list()
+        self.rag_service = rag_service 
         ##########################################################################
 
         ##########################################################################
@@ -68,17 +70,20 @@ class CodingAgent:
             """Node that calls the LLM with tools"""
             messages = state.messages
             
-            system_message = SystemMessage(content="""You are Fractal, an expert coding assistant with access to file system tools.
-                You can read, write, edit files, navigate directories, and search through code.
+            system_message = SystemMessage(content="""You are Fractal, an expert coding assistant with access to file system tools and Retrieval-Augmented Generation (RAG)-powered codebase search.
+                You can:
+                - Read, write, edit files, navigate directories, and search through code
+                - Search the codebase using RAG to find relevant code snippets and functions
 
                 When asked to perform a task:
-                1. Break down the task into steps
-                2. Use available tools to gather information
-                3. Execute the necessary file operations
-                4. Provide clear explanations of what you're doing
-                5. Show the results
+                1. Use RAG search to understand the codebase context first
+                2. Break down the task into steps
+                3. Use available tools to gather information
+                4. Execute the necessary file operations
+                5. Provide clear explanations of what you're doing
+                6. Show the results
 
-                Always be thorough and explain your reasoning.""")
+                Always leverage the codebase context to provide more accurate and relevant responses.""")
             
             full_messages = [system_message] + messages
             

@@ -126,6 +126,45 @@ def get_tool_list():
         """
         return delete_file(file_path)
     
+
+    @tool
+    @traceable('tool', name="search_codebase_tool")
+    def search_codebase_tool(query: str) -> str:
+        """
+        Search the codebase using RAG for relevant code snippets and functions.
+        
+        Args:
+            query: Natural language query about the codebase
+            
+        Returns:
+            Relevant code snippets and explanations from the codebase
+        """
+        if not hasattr(search_codebase_tool, '_rag_service') or not search_codebase_tool._rag_service:
+            return "Error: RAG service not available. Please initialize the agent with RAG service."
+        
+        rag_service = search_codebase_tool._rag_service
+        
+        try:
+            results = rag_service.search(query, top_k=20)
+            
+            if not results:
+                return f"No relevant code found for query: '{query}'"
+            
+            summary = rag_service.rerank(results, query)
+            
+            response = f"RAG Search Results for '{query}':\n\n"
+            response += f"Summary: {summary}\n\n"
+            response += "Relevant Code Snippets:\n"
+            
+            for i, doc in enumerate(results, 1):
+                response += f"\n{i}. {doc.page_content[:200]}...\n"
+            
+            return response
+            
+        except Exception as e:
+            return f"Error searching codebase: {str(e)}"
+
+
     return [
         read_file_tool,
         write_file_tool,
@@ -133,5 +172,6 @@ def get_tool_list():
         edit_file_tool,
         search_files_tool,
         create_directory_tool,
-        delete_file_tool
+        delete_file_tool,
+        search_codebase_tool
     ]

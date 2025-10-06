@@ -160,13 +160,20 @@ class RAGService:
         updated_index = {}
         changed_files = []
 
-        for file in root.rglob("*.py"):
-            content = file.read_text(encoding="utf-8")
-            file_hash = self._compute_hash(content)
-            updated_index[file.as_posix()] = file_hash
+        code_extensions = ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.go', '.rs', '.php', '.rb']
+        
+        for file in root.rglob('*'):
+            if file.is_file() and file.suffix.lower() in code_extensions:
+                try:
+                    content = file.read_text(encoding="utf-8")
+                    file_hash = self._compute_hash(content)
+                    updated_index[file.as_posix()] = file_hash
 
-            if file.as_posix() not in current_index or current_index[file.as_posix()] != file_hash:
-                changed_files.append(file)
+                    if file.as_posix() not in current_index or current_index[file.as_posix()] != file_hash:
+                        changed_files.append(file)
+                except Exception as e:
+                    print(f"Error reading {file}: {e}")
+                    continue
 
         self._save_index(root, updated_index)
         return changed_files
@@ -179,57 +186,44 @@ class RAGService:
 
         print(f"Re-embedding {len(changed_files)} modified files...")
 
+        all_new_docs = []
+
         for file in changed_files:
-            content = file.read_text(encoding="utf-8")
-            docs = self.chunk_code_file(content)
-            self.embed_chunks_and_store(docs)
+            try:
+                content = file.read_text(encoding="utf-8")
+                docs = self.chunk_code_file(content)
 
-        print("Re-embedding complete.")
+                for doc in docs:
+                    doc.metadata["source_file"] = str(file)
+                    doc.metadata["file_hash"] = self._compute_hash(content)
+                
+                all_new_docs.extend(docs)
+            except Exception as e:
+                print(f"Error processing file {file}: {e}")
+                continue
+        
+        if all_new_docs:
+            self.vector_store.add_documents(all_new_docs)
 
+            self._rebuild_retrievers()
 
-# ----------------------------------------------------------------------
-# Example usage
-# ----------------------------------------------------------------------
-# if __name__ == "__main__":
-#     openai_api_key = os.getenv("OPENAI_API_KEY")
-#     google_api_key = os.getenv("GOOGLE_EMBEDDING_API_KEY")
+            print(f"Re-embedding complete. Added {len(all_new_docs)} new chunks.")
 
-#     llm = init_chat_model(
-#         "gpt-4o",
-#         model_provider="openai",
-#         temperature=0.2,
-#         api_key=openai_api_key,
-#     )
-#     if not google_api_key:
-#         raise ValueError("no google api")
-
-#     embedding_model = GoogleGenerativeAIEmbeddings(
-#         model="gemini-embedding-001",
-#         google_api_key=SecretStr(google_api_key)
-#     )
-
-#     rag = RAGService(llm, embedding_model, "./")
-
-#     code_content = """
-#     def add(a, b):
-#         return a + b
-
-#     def multiply(a, b):
-#         return a * b
-
-#     def divide(a, b):
-#         if b == 0:
-#             raise ValueError("Cannot divide by zero")
-#         return a / b
-#     """
-
-#     chunks = rag.chunk_code_file(code_content)
-#     rag.embed_chunks_and_store(chunks)
-
-#     results = rag.search("function that multiplies numbers")
-#     print("\n🔍 Retrieved documents:")
-#     for d in results:
-#         print("-", d.page_content[:100], "...")
-
-#     summary = rag.rerank(results, "function that multiplies numbers")
-#     print("\n🧠 Reranked summary:\n", summary)
+    def _rebuild_retrievers(self):
+        """Rebuild the hybrid retriever efficiently with all documents"""
+        try:
+            all_docs = self.vector_store.similarity_search("", k=10000)
+            
+            if all_docs:
+                self.sparse_retriever = BM25Retriever.from_documents(all_docs)
+                
+                dense_retriever = self.vector_store.as_retriever(search_kwargs={"k": 4})
+                
+                self.hybrid_retriever = EnsembleRetriever(
+                    retrievers=[dense_retriever, self.sparse_retriever],
+                    weights=[0.6, 0.4],
+                )
+                
+                print("Hybrid retriever rebuilt successfully.")
+        except Exception as e:
+            print(f"Error rebuilding retrievers: {e}")

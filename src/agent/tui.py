@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from rag_service.rag import RAGService
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from pydantic import SecretStr
+from langchain.chat_models import init_chat_model
+from utils import search_codebase_tool
 
 load_dotenv()
 
@@ -125,11 +127,54 @@ class FractalAgent:
             print(f"\nInitializing {self.config['llm'].upper()} agent...")
 
             api_key = self.config['api_keys'].get(self.config['llm'])
+
+            # here we are initializing the rag service if it is not already initialized
+            rag_service = None
+            if not hasattr(self, 'rag_service') or not self.rag_service:
+                try:
+                    embed_key = self.config['embedding_api_keys'].get('gemini')
+                    google_api_key = google_key or embed_key
+
+                    if google_api_key:
+                        embedding_model = GoogleGenerativeAIEmbeddings(
+                            model="gemini-embedding-001", 
+                            google_api_key=SecretStr(google_api_key)
+                        )
+                        
+                        temp_llm = init_chat_model(
+                            "gpt-4o", 
+                            model_provider="openai", 
+                            temperature=0.2, 
+                            api_key=os.getenv("OPENAI_API_KEY")
+                        )
+                        
+                        self.rag_service = RAGService(
+                            llm=temp_llm,
+                            embedding_model=embedding_model,
+                            project_name=Path(os.getcwd()).name
+                        )
+                        
+                        rag_service = self.rag_service
+                        print("RAG service initialized successfully!")
+                except Exception as e:
+                    print(f"Warning: Could not initialize RAG service: {e}")
+                    print("Agent will work without RAG capabilities.")
+            else:
+                rag_service = self.rag_service
+
             self.agent = CodingAgent(
                 llm=self.config['llm'],
                 api_key=api_key,
-                verbose=self.config['verbose']
+                verbose=self.config['verbose'],
+                rag_service=rag_service
             )
+
+            ####################################################################################################################
+            # Set RAG service reference in tools if it is initialized
+            ####################################################################################################################
+            if rag_service:
+                search_codebase_tool._rag_service = rag_service
+
             print(f"Agent initialized successfully!")
             return True
 
