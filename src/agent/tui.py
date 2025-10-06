@@ -1,11 +1,20 @@
+import os
+from pathlib import Path
 from prompt_toolkit.styles import Style
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.completion import WordCompleter
 from agent import CodingAgent #type:ignore
 from dotenv import load_dotenv
+from rag_service.rag import RAGService
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from pydantic import SecretStr
 
 load_dotenv()
+
+google_key = os.getenv("GOOGLE_EMBEDDING_API_KEY")
+if not google_key:
+    raise ValueError("no google api key set")
 
 class FractalAgent:
     def __init__(self) -> None:
@@ -84,6 +93,8 @@ class FractalAgent:
 |-------------------------------------------------------------|
 │ /session           - Show session statistics                │
 |-------------------------------------------------------------|
+│ /reembed           - Re-Index the project codebase          │
+|-------------------------------------------------------------|
 │ /clear             - Clear screen                           │
 |-------------------------------------------------------------|
 │ /help              - Show this help message                 │
@@ -157,21 +168,6 @@ class FractalAgent:
         elif command == '/config':
             self.print_config()
             
-
-        elif command == '/llm':
-            if len(parts) < 2:
-                print("Error: Please specify an LLM provider (openai, gemini, claude)")
-
-            elif parts[1].lower() in ['openai', 'gemini', 'claude']:
-                self.config['llm'] = parts[1].lower()
-                print(f"LLM provider set to: {parts[1].lower()}")
-                
-                if self.agent:
-                    self.initialize_agent()
-            else:
-                print("Error: Invalid LLM provider. Choose from: openai, gemini, claude")
-                
-
         elif command == '/verbose':
             self.config['verbose'] = not self.config['verbose']
             if self.config['verbose']:
@@ -179,34 +175,8 @@ class FractalAgent:
             else:
                 status = "disabled"
             print(f"Verbose mode {status}")
-            
 
-        elif command == '/mcp':
-            if len(parts) < 3:
-                print("Error: Usage: /mcp <add|remove> <postgresql|mongodb>")
-            else:
-                action = parts[1].lower()
-                db = parts[2].lower()
-                
-                if db not in ['postgresql', 'mongodb']:
-                    print("Error: Invalid database. Choose from: postgresql, mongodb")
-
-                elif action == 'add':
-                    if db not in self.config['mcp']:
-                        self.config['mcp'].append(db)
-                        print(f"Added {db} to MCP")
-                    else:
-                        print(f"{db} is already in MCP")
-                elif action == 'remove':
-                    if db in self.config['mcp']:
-                        self.config['mcp'].remove(db)
-                        print(f"Removed {db} from MCP")
-                    else:
-                        print(f"{db} is not in MCP")
-                else:
-                    print("Error: Invalid action. Use 'add' or 'remove'")
-
-
+        
         elif command == '/apikey':
             if len(parts) < 3:
                 print("Usage: /apikey <provider> <key>")
@@ -251,7 +221,71 @@ class FractalAgent:
                 print(f"Context Window: {summary['context_window']}")
                 print(f"Max History: {summary['max_history']}")
                 print("-" * 60)
-        
+
+        elif command == '/llm':
+            if len(parts) < 2:
+                print("Error: Please specify an LLM provider (openai, gemini, claude)")
+
+            elif parts[1].lower() in ['openai', 'gemini', 'claude']:
+                self.config['llm'] = parts[1].lower()
+                print(f"LLM provider set to: {parts[1].lower()}")
+                
+                if self.agent:
+                    self.initialize_agent()
+            else:
+                print("Error: Invalid LLM provider. Choose from: openai, gemini, claude")                
+
+        elif command == '/reembed':
+            if not self.agent:
+                print("Agent not initialized.")
+            else:
+                project_path = os.getcwd()
+               
+                if not hasattr(self.agent, "rag_service"):
+                    embed_key = self.config['embedding_api_keys'].get('gemini')
+                    
+                    if not google_key:
+                        raise ValueError()
+                        
+                    google_api_key = google_key or embed_key
+                    
+                    embedding_model = GoogleGenerativeAIEmbeddings(
+                        model="gemini-embedding-001", google_api_key=SecretStr(google_api_key)
+                    )
+                    self.agent.rag_service = RAGService(
+                        llm=self.agent.client, 
+                        embedding_model=embedding_model,
+                        project_name=Path(project_path).name
+                    )
+
+                self.agent.rag_service.reembed_changed_files(project_path)   
+
+        elif command == '/mcp':
+            if len(parts) < 3:
+                print("Error: Usage: /mcp <add|remove> <postgresql|mongodb>")
+            else:
+                action = parts[1].lower()
+                db = parts[2].lower()
+                
+                if db not in ['postgresql', 'mongodb']:
+                    print("Error: Invalid database. Choose from: postgresql, mongodb")
+
+                elif action == 'add':
+                    if db not in self.config['mcp']:
+                        self.config['mcp'].append(db)
+                        print(f"Added {db} to MCP")
+                    else:
+                        print(f"{db} is already in MCP")
+                elif action == 'remove':
+                    if db in self.config['mcp']:
+                        self.config['mcp'].remove(db)
+                        print(f"Removed {db} from MCP")
+                    else:
+                        print(f"{db} is not in MCP")
+                else:
+                    print("Error: Invalid action. Use 'add' or 'remove'")
+
+ 
         #####################################################################
         # here if input does not start with "/" then we process here#
         ##################################################################### 
@@ -291,7 +325,23 @@ class FractalAgent:
         if self.session is None:
             print("Error: TUI session could not be initialized.")
             return
-        
+        # --------------------------------------------------------------------------------------------------------------------------------
+        # --------------------------------------------------------------------------------------------------------------------------------
+        #   here we are creating a async task so that we can periodically reembed the codebase
+        # --------------------------------------------------------------------------------------------------------------------------------
+        # --------------------------------------------------------------------------------------------------------------------------------
+        try:
+            project_path = os.getcwd()
+            asyncio.create_task(periodic_reembedding(self, project_path, interval=600))
+            print("Background re-embedding started (every 10 min)")
+        except Exception as e:
+            print(f"Failed to start background re-embedding: {e}")
+
+        # --------------------------------------------------------------------------------------------------------------------------------
+        # --------------------------------------------------------------------------------------------------------------------------------
+        # --------------------------------------------------------------------------------------------------------------------------------
+        # --------------------------------------------------------------------------------------------------------------------------------
+
         try:
             while self.running:
                 try:
@@ -315,3 +365,19 @@ class FractalAgent:
                 traceback.print_exc()
         finally:
             print()
+
+
+# ----------------------------------------------------------------------
+# periodic re-embedding background task
+# ----------------------------------------------------------------------
+import asyncio
+
+async def periodic_reembedding(agent, path, interval=600):
+    """Periodically re-embed changed files in the background"""
+    while agent.running:
+        try:
+            if hasattr(agent, "rag_service"):
+                agent.rag_service.reembed_changed_files(path)
+        except Exception as e:
+            print(f"Reembedding error: {e}")
+        await asyncio.sleep(interval)

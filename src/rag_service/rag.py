@@ -1,4 +1,8 @@
 import os
+import uuid
+import hashlib
+import json
+from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
 from langchain_core.documents import Document
@@ -30,21 +34,21 @@ class RAGService:
         self,
         llm,
         embedding_model,
-        collection_name: str = "code_chunks",
+        project_name: str,
         embedding_dim: int = 3072,
     ):
         self.llm = llm
         self.embedding_model = embedding_model
         self.embedding_dim = embedding_dim
-        self.collection_name = collection_name
+        self.collection_name = f"fractal_{project_name}_{uuid.uuid4().hex[:6]}" # i think what i can do is rather than having fractal_project_name_uuid i can have fractal_project_name where project_name will be the path to the current working dir
 
         self.qdrant_client = QdrantClient(api_key=qdrant_api_key, url=qdrant_url)
 
         # Create collection if not exists
         existing = [col.name for col in self.qdrant_client.get_collections().collections]
-        if collection_name not in existing:
+        if self.collection_name not in existing:
             self.qdrant_client.create_collection(
-                collection_name=collection_name,
+                collection_name=self.collection_name,
                 vectors_config={
                     "dense": VectorParams(size=embedding_dim, distance=Distance.COSINE)
                 },
@@ -59,7 +63,7 @@ class RAGService:
 
         self.vector_store = QdrantVectorStore(
             client=self.qdrant_client,
-            collection_name=collection_name,
+            collection_name=self.collection_name,
             embedding=self.embedding_model,
             sparse_embedding=sparse_embeddings,
             retrieval_mode=RetrievalMode.HYBRID,
@@ -117,63 +121,115 @@ class RAGService:
         """Use LLM to rerank and summarize retrieved documents."""
         context = "\n\n".join([d.page_content for d in docs])
         prompt = f"""
-You are an expert assistant. Given the query below, rank and summarize the most relevant parts from the retrieved context.
+            You are an expert assistant. Given the query below, rank and summarize the most relevant parts from the retrieved context.
 
-Query:
-{query}
+            Query:
+            {query}
 
-Context:
-{context}
+            Context:
+            {context}
 
-Summarize concisely and prioritize relevant parts.
-"""
+            Summarize concisely and prioritize relevant parts.
+        """
         response = self.llm.invoke(prompt)
         return response.content
+
+###########################################################################################################################################################
+###########################################################################################################################################################
+#helper functions for checking the diffs and when to reembed and what should be reembeded
+###########################################################################################################################################################
+###########################################################################################################################################################
+    def _compute_hash(self, text: str) -> str:
+        return hashlib.sha256(text.encode('utf-8')).hexdigest()
+    
+    def _load_index(self, root: Path) -> dict:
+        index_file = root / ".fractal_index.json"
+        if index_file.exists():
+            with open(index_file, "r") as f:
+                return json.load(f)
+        return {}
+    
+    def _save_index(self, root: Path, data: dict):
+        with open(root / ".fractal_index.json", "w") as f:
+            json.dump(data, f, indent=2) 
+
+    def detect_changes(self, root_dir: str) -> list[Path]:
+        """Compare hashes to detect modified or new files."""
+        root = Path(root_dir)
+        current_index = self._load_index(root)
+        updated_index = {}
+        changed_files = []
+
+        for file in root.rglob("*.py"):
+            content = file.read_text(encoding="utf-8")
+            file_hash = self._compute_hash(content)
+            updated_index[file.as_posix()] = file_hash
+
+            if file.as_posix() not in current_index or current_index[file.as_posix()] != file_hash:
+                changed_files.append(file)
+
+        self._save_index(root, updated_index)
+        return changed_files
+
+    def reembed_changed_files(self, root_dir: str):
+        changed_files = self.detect_changes(root_dir)
+        if not changed_files:
+            print("No code changes detected.")
+            return
+
+        print(f"Re-embedding {len(changed_files)} modified files...")
+
+        for file in changed_files:
+            content = file.read_text(encoding="utf-8")
+            docs = self.chunk_code_file(content)
+            self.embed_chunks_and_store(docs)
+
+        print("Re-embedding complete.")
 
 
 # ----------------------------------------------------------------------
 # Example usage
 # ----------------------------------------------------------------------
-if __name__ == "__main__":
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    google_api_key = os.getenv("GOOGLE_EMBEDDING_API_KEY")
+# if __name__ == "__main__":
+#     openai_api_key = os.getenv("OPENAI_API_KEY")
+#     google_api_key = os.getenv("GOOGLE_EMBEDDING_API_KEY")
 
-    llm = init_chat_model(
-        "gpt-4o",
-        model_provider="openai",
-        temperature=0.2,
-        api_key=openai_api_key,
-    )
-    if not google_api_key:
-        raise ValueError("no google api")
+#     llm = init_chat_model(
+#         "gpt-4o",
+#         model_provider="openai",
+#         temperature=0.2,
+#         api_key=openai_api_key,
+#     )
+#     if not google_api_key:
+#         raise ValueError("no google api")
 
-    embedding_model = GoogleGenerativeAIEmbeddings(
-        model="gemini-embedding-001",
-        google_api_key=SecretStr(google_api_key)
-    )
+#     embedding_model = GoogleGenerativeAIEmbeddings(
+#         model="gemini-embedding-001",
+#         google_api_key=SecretStr(google_api_key)
+#     )
 
-    rag = RAGService(llm, embedding_model)
+#     rag = RAGService(llm, embedding_model, "./")
 
-    code_content = """
-    def add(a, b):
-        return a + b
+#     code_content = """
+#     def add(a, b):
+#         return a + b
 
-    def multiply(a, b):
-        return a * b
+#     def multiply(a, b):
+#         return a * b
 
-    def divide(a, b):
-        if b == 0:
-            raise ValueError("Cannot divide by zero")
-        return a / b
-    """
+#     def divide(a, b):
+#         if b == 0:
+#             raise ValueError("Cannot divide by zero")
+#         return a / b
+#     """
 
-    chunks = rag.chunk_code_file(code_content)
-    rag.embed_chunks_and_store(chunks)
+#     chunks = rag.chunk_code_file(code_content)
+#     rag.embed_chunks_and_store(chunks)
 
-    results = rag.search("function that multiplies numbers")
-    print("\n🔍 Retrieved documents:")
-    for d in results:
-        print("-", d.page_content[:100], "...")
+#     results = rag.search("function that multiplies numbers")
+#     print("\n🔍 Retrieved documents:")
+#     for d in results:
+#         print("-", d.page_content[:100], "...")
 
-    summary = rag.rerank(results, "function that multiplies numbers")
-    print("\n🧠 Reranked summary:\n", summary)
+#     summary = rag.rerank(results, "function that multiplies numbers")
+#     print("\n🧠 Reranked summary:\n", summary)
