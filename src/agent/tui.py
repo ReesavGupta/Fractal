@@ -1,10 +1,11 @@
 import os
+import sys
 from pathlib import Path
 from prompt_toolkit.styles import Style
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.completion import WordCompleter
-from src.agent.agent import CodingAgent #type:ignore
+from src.agent.agent import CodingAgent
 from dotenv import load_dotenv
 from src.rag_service.rag import RAGService
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -23,6 +24,28 @@ if not nomic_key:
 if not google_key:
     raise ValueError("no google api key set")
 
+
+class Colors:
+    """ANSI color codes"""
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    
+    # Colors
+    BLUE = "\033[94m"
+    CYAN = "\033[96m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    MAGENTA = "\033[95m"
+    GRAY = "\033[90m"
+    
+    # Backgrounds
+    BG_BLUE = "\033[44m"
+    BG_GREEN = "\033[42m"
+    BG_YELLOW = "\033[43m"
+
+
 class FractalAgent:
     def __init__(self) -> None:
         self.config= {
@@ -36,6 +59,22 @@ class FractalAgent:
         self.running = True
         self.agent = None
 
+    def print_reasoning(self, text: str):
+        """Print agent's reasoning/thinking process"""
+        print(f"\n{Colors.DIM}{Colors.BLUE}💭 Thinking: {Colors.RESET}{Colors.DIM}{text}{Colors.RESET}")
+    
+    def print_tool_call(self, tool_name: str, args: dict):
+        """Print tool call information"""
+        print(f"\n{Colors.CYAN}{Colors.BOLD}🔧 Using tool:{Colors.RESET} {Colors.CYAN}{tool_name}{Colors.RESET}")
+    
+    def print_tool_result(self, tool_name: str, result: str):
+        """Print tool execution result"""
+        result_preview = result
+        print(f"{Colors.GREEN}✓{Colors.RESET} {Colors.DIM}Result: {result_preview}{Colors.RESET}")
+    
+    def print_response_start(self):
+        """Print response header"""
+        print(f"\n{Colors.BOLD}{Colors.MAGENTA}🤖 Fractal:{Colors.RESET}")
     
     def setup_tui(self):
         commands = WordCompleter([
@@ -129,7 +168,6 @@ class FractalAgent:
 
             api_key = self.config['api_keys'].get(self.config['llm'])
 
-            # Initialize RAG service if not already done
             rag_service = None
             if not hasattr(self, 'rag_service') or not self.rag_service:
                 try:
@@ -137,11 +175,6 @@ class FractalAgent:
                     google_api_key = google_key or embed_key
 
                     if google_api_key:
-                        # embedding_model = GoogleGenerativeAIEmbeddings(
-                        #     model="gemini-embedding-001", 
-                        #     google_api_key=SecretStr(google_api_key)
-                        # )
-                        
                         embedding_model = NomicEmbeddings(
                             nomic_api_key=nomic_key,
                             dimensionality=768,
@@ -163,14 +196,12 @@ class FractalAgent:
                             project_name=Path(project_path).name
                         )
                         
-                        # Check if index exists, if not do initial indexing
                         index_file = Path(project_path) / ".fractal_index.json"
                         if not index_file.exists():
                             print("First time setup: Indexing codebase...")
                             await self.rag_service.index_codebase(project_path)
                         else:
                             print("Loading existing codebase index...")
-                            # Still rebuild retrievers with existing data
                             self.rag_service._rebuild_retrievers()
                         
                         rag_service = self.rag_service
@@ -181,7 +212,6 @@ class FractalAgent:
             else:
                 rag_service = self.rag_service
 
-            # Initialize the agent
             self.agent = CodingAgent(
                 llm=self.config['llm'],
                 api_key=api_key,
@@ -189,7 +219,6 @@ class FractalAgent:
                 rag_service=rag_service
             )
 
-            # FIXED: Set RAG service reference globally before tools are created
             if rag_service:
                 set_rag_service(rag_service)
 
@@ -212,34 +241,25 @@ class FractalAgent:
             return True
             
         command = parts[0].lower()
-        
 
         if command in ['/quit']:
             print("\nThanks for using Fractal! See you soon in space!\n")
             return False
-            
 
         elif command == '/help':
             self.print_help()
-            
 
         elif command == '/clear':
-            print("\033[2J\033[H", end="") 
-            # self.print_banner()
-
+            print("\033[2J\033[H", end="")
 
         elif command == '/config':
             self.print_config()
             
         elif command == '/verbose':
             self.config['verbose'] = not self.config['verbose']
-            if self.config['verbose']:
-                status = "enabled"
-            else:
-                status = "disabled"
+            status = "enabled" if self.config['verbose'] else "disabled"
             print(f"Verbose mode {status}")
 
-        
         elif command == '/apikey':
             if len(parts) < 3:
                 print("Usage: /apikey <provider> <key>")
@@ -264,30 +284,24 @@ class FractalAgent:
         elif command == '/llm':
             if len(parts) < 2:
                 print("Error: Please specify an LLM provider (openai, gemini, claude)")
-
             elif parts[1].lower() in ['openai', 'gemini', 'claude']:
                 self.config['llm'] = parts[1].lower()
                 print(f"LLM provider set to: {parts[1].lower()}")
-                
                 if self.agent:
                     await self.initialize_agent()
             else:
-                print("Error: Invalid LLM provider. Choose from: openai, gemini, claude")                
+                print("Error: Invalid LLM provider. Choose from: openai, gemini, claude")
 
         elif command == '/reembed':
             if not self.agent:
                 print("Agent not initialized.")
             else:
                 project_path = os.getcwd()
-               
                 if not hasattr(self.agent, "rag_service"):
                     embed_key = self.config['embedding_api_keys'].get('gemini')
-                    
                     if not google_key:
                         raise ValueError()
-                        
                     google_api_key = google_key or embed_key
-                    
                     embedding_model = GoogleGenerativeAIEmbeddings(
                         model="gemini-embedding-001", google_api_key=SecretStr(google_api_key)
                     )
@@ -296,9 +310,8 @@ class FractalAgent:
                         embedding_model=embedding_model,
                         project_name=Path(project_path).name
                     )
-
                 if self.agent.rag_service:
-                    self.agent.rag_service.reembed_changed_files(project_path)   
+                    self.agent.rag_service.reembed_changed_files(project_path)
 
         elif command == '/mcp':
             if len(parts) < 3:
@@ -306,10 +319,8 @@ class FractalAgent:
             else:
                 action = parts[1].lower()
                 db = parts[2].lower()
-                
                 if db not in ['postgresql', 'mongodb']:
                     print("Error: Invalid database. Choose from: postgresql, mongodb")
-
                 elif action == 'add':
                     if db not in self.config['mcp']:
                         self.config['mcp'].append(db)
@@ -325,12 +336,8 @@ class FractalAgent:
                 else:
                     print("Error: Invalid action. Use 'add' or 'remove'")
 
- 
-        #####################################################################
-        # here if input does not start with "/" then we process here#
-        ##################################################################### 
         elif not command.startswith('/'):
-            # Process user query through agent
+            # Process user query through agent with streaming
             if not self.config['llm']:
                 print("Warning: No LLM provider set. Use /llm <provider> to configure.")
                 return True
@@ -339,22 +346,46 @@ class FractalAgent:
                 if not await self.initialize_agent():
                     return True
             
-            # Process the query
             try:
-                print(f"\nProcessing with {self.config['llm'].upper()}...\n")
-                if self.agent:
-                    response = await self.agent.ainvoke(cmd)
-                    # response = ""
-                    # async for token in self.agent.astream(cmd):
-                    #     await asyncio.sleep(10)
-                    #     print(str(token))
-                    print(f"\n{response}\n")
+                response_started = False
+                
+                if not self.agent:
+                    raise ValueError("agent not initialized")
+
+                async for event in self.agent.astream(cmd):
+                    event_type = event.get("type")
+                    content = event.get("content", "")
+                    metadata = event.get("metadata", {})
+                    
+                    if event_type == "reasoning":
+                        self.print_reasoning(content)
+                    
+                    elif event_type == "tool_call":
+                        tool_name = content
+                        args = metadata.get("args", {})
+                        self.print_tool_call(tool_name, args)
+                    
+                    elif event_type == "tool_result":
+                        tool_name = metadata.get("tool_name", "unknown")
+                        self.print_tool_result(tool_name, content)
+                    
+                    elif event_type == "response_start":
+                        if not response_started:
+                            self.print_response_start()
+                            response_started = True
+                    
+                    elif event_type == "response_token":
+                        sys.stdout.write(content)
+                        sys.stdout.flush()
+                
+                if response_started:
+                    print()  # New line after response
+                
             except Exception as e:
-                print(f"\nError processing request: {str(e)}\n")
+                print(f"\n{Colors.RED}Error processing request: {str(e)}{Colors.RESET}\n")
                 if self.config['verbose']:
                     import traceback
                     traceback.print_exc()
-
 
         else:
             print(f"Unknown command: {command}. Type /help for available commands.")
@@ -369,22 +400,14 @@ class FractalAgent:
         if self.session is None:
             print("Error: TUI session could not be initialized.")
             return
-        # --------------------------------------------------------------------------------------------------------------------------------
-        # --------------------------------------------------------------------------------------------------------------------------------
-        #   here we are creating a async task so that we can periodically reembed the codebase
-        # --------------------------------------------------------------------------------------------------------------------------------
-        # --------------------------------------------------------------------------------------------------------------------------------
+
         try:
             project_path = os.getcwd()
+            import asyncio
             asyncio.create_task(periodic_reembedding(self, project_path, interval=600))
             print("Background re-embedding started (every 10 min)")
         except Exception as e:
             print(f"Failed to start background re-embedding: {e}")
-
-        # --------------------------------------------------------------------------------------------------------------------------------
-        # --------------------------------------------------------------------------------------------------------------------------------
-        # --------------------------------------------------------------------------------------------------------------------------------
-        # --------------------------------------------------------------------------------------------------------------------------------
 
         try:
             while self.running:
@@ -411,9 +434,6 @@ class FractalAgent:
             print()
 
 
-# ----------------------------------------------------------------------
-# periodic re-embedding background task
-# ----------------------------------------------------------------------
 import asyncio
 
 async def periodic_reembedding(agent, path, interval=600):
