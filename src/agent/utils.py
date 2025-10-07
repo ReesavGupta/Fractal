@@ -93,7 +93,8 @@ def get_tool_list():
         file_extension: Optional[str] = None
     ) -> str:
         """
-        Search for files matching a regex pattern in their content.
+        FAST search for files matching a regex pattern in their content.
+        Use this for simple searches instead of search_codebase_tool.
         
         Args:
             dir_path: Directory to search in
@@ -139,6 +140,8 @@ def get_tool_list():
     def search_codebase_tool(query: str) -> str:
         """
         Search the codebase using RAG for relevant code snippets and functions.
+        WARNING: This tool is SLOW (20+ seconds). Only use for complex queries requiring semantic understanding.
+        For simple file searches, use search_files_tool instead.
         
         Args:
             query: Natural language query about the codebase
@@ -150,20 +153,21 @@ def get_tool_list():
             return "Error: RAG service not available. Please initialize the agent with RAG service."
         
         try:
-            results = _rag_service_ref.search(query, top_k=5)
+            # Reduce top_k for faster performance
+            results = _rag_service_ref.search(query, top_k=3)
             
             if not results:
                 return f"No relevant code found for query: '{query}'"
             
-            summary = _rag_service_ref.rerank(results, query)
-            
+            # Skip LLM reranking for better performance - just return raw results
             response = f"RAG Search Results for '{query}':\n\n"
-            response += f"Summary: {summary}\n\n"
             response += "Relevant Code Snippets:\n"
             
             for i, doc in enumerate(results, 1):
                 source = doc.metadata.get('source_file', 'unknown')
-                response += f"\n{i}. From {source}:\n{doc.page_content}\n"
+                # Truncate long content for readability
+                content = doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content
+                response += f"\n{i}. From {source}:\n{content}\n"
             
             return response
             

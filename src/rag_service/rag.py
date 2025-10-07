@@ -30,14 +30,14 @@ class RAGService:
         llm,
         embedding_model,
         project_name: str,
-        embedding_dim: int = 3072,
+        embedding_dim: int = 768,
     ):
         self.llm = llm
         self.embedding_model = embedding_model
         self.embedding_dim = embedding_dim
         self.collection_name = f"fractal_{project_name.replace('/', '_').replace(' ', '_')}"
 
-        self.qdrant_client = QdrantClient(api_key=qdrant_api_key, url=qdrant_url)
+        self.qdrant_client = QdrantClient(api_key=qdrant_api_key, url=qdrant_url, https=True, prefer_grpc=False, timeout=30)
 
         # Create collection if not exists
         existing = [col.name for col in self.qdrant_client.get_collections().collections]
@@ -86,7 +86,7 @@ class RAGService:
     # ------------------------------------------------------------------
     # Initial indexing
     # ------------------------------------------------------------------
-    def index_codebase(self, root_dir: str):
+    async def index_codebase(self, root_dir: str):
         """Index the entire codebase for the first time"""
         root = Path(root_dir)
         code_extensions = ['.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.go', '.rs', '.php', '.rb']
@@ -115,10 +115,10 @@ class RAGService:
         
         if all_docs:
             print(f"Indexing {len(indexed_files)} files with {len(all_docs)} chunks...")
-            self.embed_chunks_and_store(all_docs)
+            await self.embed_chunks_and_store(all_docs)
             
             # Save index
-            index_data = {f: self._compute_hash(Path(root, f).read_text()) for f in indexed_files if (Path(root) / f).exists()}
+            index_data = {f: self._compute_hash(Path(root, f).read_text(encoding="utf-8")) for f in indexed_files if (Path(root) / f).exists()}
 
             self._save_index(root, index_data)
             
@@ -129,23 +129,24 @@ class RAGService:
     # ------------------------------------------------------------------
     # Ingest: embed & store documents
     # ------------------------------------------------------------------
-    def embed_chunks_and_store(self, docs: List[Document]):
+    async def embed_chunks_and_store(self, docs: List[Document]):
         """Embed + store documents in Qdrant + initialize BM25 retriever."""
         if not docs:
             raise ValueError("No documents to embed/store.")
         
-        self.vector_store.add_documents(docs)
+        await self.vector_store.aadd_documents(docs)
         print(f"Stored {len(docs)} chunks in Qdrant collection '{self.collection_name}'")
 
         # Get all documents for BM25
         all_docs = self._get_all_documents()
         if all_docs:
             self.sparse_retriever = BM25Retriever.from_documents(all_docs)
-            dense_retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
+            # Optimize dense retriever for speed
+            dense_retriever = self.vector_store.as_retriever(search_kwargs={"k": 3})
 
             self.hybrid_retriever = EnsembleRetriever(
                 retrievers=[dense_retriever, self.sparse_retriever],
-                weights=[0.6, 0.4],
+                weights=[0.7, 0.3],  # Favor dense retrieval for better semantic matching
             )
             print("Hybrid retriever initialized")
 
@@ -153,16 +154,17 @@ class RAGService:
     # Retrieval
     # ------------------------------------------------------------------
     def search(self, query: str, top_k: int = 3) -> List[Document]:
-        """Hybrid retrieval: dense + sparse."""
+        """Hybrid retrieval: dense + sparse. Optimized for speed."""
         if not self.hybrid_retriever:
             # Try to initialize if not already done
             all_docs = self._get_all_documents()
             if all_docs:
                 self.sparse_retriever = BM25Retriever.from_documents(all_docs)
-                dense_retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
+                # Reduce k for faster dense retrieval
+                dense_retriever = self.vector_store.as_retriever(search_kwargs={"k": 3})
                 self.hybrid_retriever = EnsembleRetriever(
                     retrievers=[dense_retriever, self.sparse_retriever],
-                    weights=[0.6, 0.4],
+                    weights=[0.7, 0.3],  # Favor dense retrieval for better semantic matching
                 )
             else:
                 raise RuntimeError("No documents in collection. Call index_codebase() first.")
@@ -201,12 +203,12 @@ class RAGService:
     def _load_index(self, root: Path) -> dict:
         index_file = root / ".fractal_index.json"
         if index_file.exists():
-            with open(index_file, "r") as f:
+            with open(index_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {}
     
     def _save_index(self, root: Path, data: dict):
-        with open(root / ".fractal_index.json", "w") as f:
+        with open(root / ".fractal_index.json", "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2) 
 
     def _get_all_documents(self) -> List[Document]:
@@ -286,11 +288,12 @@ class RAGService:
             
             if all_docs:
                 self.sparse_retriever = BM25Retriever.from_documents(all_docs)
-                dense_retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
+                # Optimize for speed
+                dense_retriever = self.vector_store.as_retriever(search_kwargs={"k": 3})
                 
                 self.hybrid_retriever = EnsembleRetriever(
                     retrievers=[dense_retriever, self.sparse_retriever],
-                    weights=[0.6, 0.4],
+                    weights=[0.7, 0.3],  # Favor dense retrieval for better semantic matching
                 )
                 
         except Exception as e:

@@ -11,10 +11,15 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from pydantic import SecretStr
 from langchain.chat_models import init_chat_model
 from src.agent.utils import set_rag_service
+from langchain_nomic import NomicEmbeddings
 
 load_dotenv()
 
 google_key = os.getenv("GOOGLE_EMBEDDING_API_KEY")
+nomic_key = os.getenv("NOMIC_EMBEDDING_API_KEY")
+
+if not nomic_key:
+    raise ValueError("no nomic api key set")
 if not google_key:
     raise ValueError("no google api key set")
 
@@ -113,7 +118,7 @@ class FractalAgent:
         print(f"│ Agent Status: {agent_status:<37} │")
         print("└─────────────────────────────────────────────────────┘\n")
     
-    def initialize_agent(self):
+    async def initialize_agent(self):
         """Initialize the coding agent with current configuration"""
         if not self.config['llm']:
             print("Error: No LLM provider set. Use /llm <provider> first.")
@@ -132,11 +137,17 @@ class FractalAgent:
                     google_api_key = google_key or embed_key
 
                     if google_api_key:
-                        embedding_model = GoogleGenerativeAIEmbeddings(
-                            model="gemini-embedding-001", 
-                            google_api_key=SecretStr(google_api_key)
-                        )
+                        # embedding_model = GoogleGenerativeAIEmbeddings(
+                        #     model="gemini-embedding-001", 
+                        #     google_api_key=SecretStr(google_api_key)
+                        # )
                         
+                        embedding_model = NomicEmbeddings(
+                            nomic_api_key=nomic_key,
+                            dimensionality=768,
+                            model="nomic-embed-text-v1.5"
+                        )
+
                         temp_llm = init_chat_model(
                             "gpt-4o", 
                             model_provider="openai", 
@@ -156,7 +167,7 @@ class FractalAgent:
                         index_file = Path(project_path) / ".fractal_index.json"
                         if not index_file.exists():
                             print("First time setup: Indexing codebase...")
-                            self.rag_service.index_codebase(project_path)
+                            await self.rag_service.index_codebase(project_path)
                         else:
                             print("Loading existing codebase index...")
                             # Still rebuild retrievers with existing data
@@ -259,7 +270,7 @@ class FractalAgent:
                 print(f"LLM provider set to: {parts[1].lower()}")
                 
                 if self.agent:
-                    self.initialize_agent()
+                    await self.initialize_agent()
             else:
                 print("Error: Invalid LLM provider. Choose from: openai, gemini, claude")                
 
@@ -325,7 +336,7 @@ class FractalAgent:
                 return True
             
             if not self.agent:
-                if not self.initialize_agent():
+                if not await self.initialize_agent():
                     return True
             
             # Process the query
