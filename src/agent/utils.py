@@ -11,20 +11,24 @@ from src.agent.tools import (
     delete_file
 )
 
-# global reference to rag service that tools can access
 _rag_service_ref = None
+_memory_manager_ref = None
 
 def set_rag_service(rag_service):
     """Set the global RAG service reference for tools to use"""
     global _rag_service_ref
     _rag_service_ref = rag_service
 
+def set_memory_manager(memory_manager):
+    """Set the global memory manager reference"""
+    global _memory_manager_ref
+    _memory_manager_ref = memory_manager
+
 def get_tool_list():
     """
     Convert tool functions to LangChain tool objects with proper schemas.
-    The @tool decorator automatically creates the schema from function signatures.
     """
-    
+
     @tool
     @traceable('tool', name="read_file_tool")
     def read_file_tool(file_path: str) -> str:
@@ -134,7 +138,6 @@ def get_tool_list():
         """
         return delete_file(file_path)
     
-
     @tool
     @traceable('tool', name="search_codebase_tool")
     def search_codebase_tool(query: str) -> str:
@@ -153,28 +156,51 @@ def get_tool_list():
             return "Error: RAG service not available. Please initialize the agent with RAG service."
         
         try:
-            # Reduce top_k for faster performance
             results = _rag_service_ref.search(query, top_k=3)
             
             if not results:
                 return f"No relevant code found for query: '{query}'"
             
-            # Skip LLM reranking for better performance - just return raw results
-            response = f"RAG Search Results for '{query}':\n\n"
-            response += "Relevant Code Snippets:\n"
-            
-            for i, doc in enumerate(results, 1):
-                source = doc.metadata.get('source_file', 'unknown')
-                # Truncate long content for readability
-                content = doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content
-                response += f"\n{i}. From {source}:\n{content}\n"
-            
-            return response
+            summary = _rag_service_ref.rerank(results, query)
+            return summary
             
         except Exception as e:
             return f"Error searching codebase: {str(e)}"
 
-
+    @tool
+    @traceable('tool', name="search_memory_tool")
+    def search_memory_tool(query: str) -> str:
+        """
+        Search through conversation memory for relevant information.
+        Use this when you need to recall previous conversations or tool results.
+        
+        Args:
+            query: Search query to find relevant memory entries
+            
+        Returns:
+            Relevant memory entries and summaries
+        """
+        if not _memory_manager_ref:
+            return "Error: Memory manager not available."
+        
+        try:
+            results = _memory_manager_ref.search_memory(query, limit=5)
+            
+            if not results:
+                return f"No relevant memory found for query: '{query}'"
+            
+            response = f"Memory Search Results for '{query}':\n\n"
+            
+            for i, entry in enumerate(results, 1):
+                response += f"{i}. [{entry.message_type.value}] {entry.timestamp.strftime('%H:%M:%S')}\n"
+                response += f"   Importance: {entry.importance:.2f}\n"
+                response += f"   Content: {entry.content[:300]}{'...' if len(entry.content) > 300 else ''}\n\n"
+            
+            return response
+            
+        except Exception as e:
+            return f"Error searching memory: {str(e)}"
+        
     return [
         read_file_tool,
         write_file_tool,
@@ -183,5 +209,6 @@ def get_tool_list():
         search_files_tool,
         create_directory_tool,
         delete_file_tool,
-        search_codebase_tool
+        search_codebase_tool,
+        search_memory_tool
     ]

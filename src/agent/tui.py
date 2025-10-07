@@ -63,9 +63,13 @@ class FractalAgent:
         """Print agent's reasoning/thinking process"""
         print(f"\n{Colors.DIM}{Colors.BLUE}💭 Thinking: {Colors.RESET}{Colors.DIM}{text}{Colors.RESET}")
     
-    def print_tool_call(self, tool_name: str, args: dict):
+    def print_tool_call(self, tool_name: str, result: str):
         """Print tool call information"""
-        print(f"\n{Colors.CYAN}{Colors.BOLD}🔧 Using tool:{Colors.RESET} {Colors.CYAN}{tool_name}{Colors.RESET}")
+        if len(result) > 200:
+            result_preview = result[:200] + "..."
+        else:
+            result_preview = result
+        print(f"{Colors.GREEN}✓{Colors.RESET} Result: {result_preview}")
     
     def print_tool_result(self, tool_name: str, result: str):
         """Print tool execution result"""
@@ -375,11 +379,11 @@ class FractalAgent:
                             response_started = True
                     
                     elif event_type == "response_token":
-                        sys.stdout.write(content)
+                        sys.stdout.write(f"{Colors.RESET}{content}")
                         sys.stdout.flush()
                 
                 if response_started:
-                    print()  # New line after response
+                    print()
                 
             except Exception as e:
                 print(f"\n{Colors.RED}Error processing request: {str(e)}{Colors.RESET}\n")
@@ -402,10 +406,12 @@ class FractalAgent:
             return
 
         try:
+            ##############################################################################################################
+            # periodic reembedding 
             project_path = os.getcwd()
-            import asyncio
             asyncio.create_task(periodic_reembedding(self, project_path, interval=600))
             print("Background re-embedding started (every 10 min)")
+            ##############################################################################################################
         except Exception as e:
             print(f"Failed to start background re-embedding: {e}")
 
@@ -440,7 +446,10 @@ async def periodic_reembedding(agent, path, interval=600):
     """Periodically re-embed changed files in the background"""
     while agent.running:
         try:
-            if hasattr(agent, "rag_service"):
+            if hasattr(agent, "rag_service") and agent.rag_service:
+                # first we  cleanup deleted files
+                agent.rag_service.cleanup_deleted_files(path)
+                # uske baad re-embed changed files
                 agent.rag_service.reembed_changed_files(path)
         except Exception as e:
             print(f"Reembedding error: {e}")

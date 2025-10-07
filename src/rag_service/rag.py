@@ -12,6 +12,8 @@ from qdrant_client import QdrantClient, models
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import EnsembleRetriever
 from qdrant_client.http.models import Distance, SparseVectorParams, VectorParams
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+
 
 load_dotenv()
 
@@ -72,14 +74,22 @@ class RAGService:
     # ------------------------------------------------------------------
     # Chunking
     # ------------------------------------------------------------------
-    def chunk_code_file(self, content: str) -> List[Document]:
+    def chunk_code_file(self, content: str, source_file: str) -> List[Document]:
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=800, 
             chunk_overlap=150,
             separators=["\n\n", "\nclass ", "\ndef ", "\n", " ", ""]
         )
         chunks = splitter.split_text(content)
-        return [Document(page_content=chunk) for chunk in chunks]
+        
+        # Create documents with unique IDs
+        docs = []
+        for i, chunk in enumerate(chunks):
+            doc = Document(page_content=chunk)
+            # We'll set the ID in the calling method where we have source_file info
+            docs.append(doc)
+        
+        return docs
     
 
     
@@ -101,11 +111,14 @@ class RAGService:
                     
                 try:
                     content = file.read_text(encoding="utf-8")
-                    docs = self.chunk_code_file(content)
+                    docs = self.chunk_code_file(content, str(file.relative_to(root)))
                     
-                    for doc in docs:
+                    for i, doc in enumerate(docs):
                         doc.metadata["source_file"] = str(file.relative_to(root))
                         doc.metadata["file_hash"] = self._compute_hash(content)
+                        doc.metadata["chunk_id"] = self._generate_chunk_id(
+                            str(file.relative_to(root)), i, doc.page_content
+                        )
                     
                     all_docs.extend(docs)
                     indexed_files.append(str(file.relative_to(root)))
@@ -197,6 +210,13 @@ class RAGService:
 #helper functions for checking the diffs and when to reembed and what should be reembeded
 ###########################################################################################################################################################
 ###########################################################################################################################################################
+
+    def _generate_chunk_id(self, source_file: str, chunk_index: int, content: str) -> str:
+        """Generate unique ID for a chunk"""
+        # Create a unique ID based on file path, chunk index, and content hash
+        content_hash = hashlib.md5(content.encode('utf-8')).hexdigest()[:8]
+        return f"{source_file.replace('/', '_')}_{chunk_index}_{content_hash}"
+
     def _compute_hash(self, text: str) -> str:
         return hashlib.sha256(text.encode('utf-8')).hexdigest()
     
@@ -251,8 +271,46 @@ class RAGService:
         self._save_index(root, updated_index)
         return changed_files
 
+
+    def _delete_chunks_by_source_files(self, source_files: List[str]) -> int:
+        """Delete chunks from vector store by source file paths"""
+        try:
+            deleted_count = 0
+            
+            for source_file in source_files:
+                try:                    
+                    metadata_filter = Filter(
+                        must=[
+                            FieldCondition(
+                                key="source_file",
+                                match=MatchValue(value=source_file)
+                            )
+                        ]
+                    )
+                    
+                    self.qdrant_client.delete(
+                        collection_name=self.collection_name,
+                        points_selector=metadata_filter
+                    )
+                    
+                    deleted_count += 1
+                    print(f"Deleted chunks from file: {source_file}")
+                    
+                except Exception as e:
+                    print(f"Error deleting chunks for {source_file}: {e}")
+                    continue
+            
+            if deleted_count > 0:
+                print(f"Successfully deleted chunks from {deleted_count} modified files")
+            
+            return deleted_count
+            
+        except Exception as e:
+            print(f"Error in deletion process: {e}")
+            return 0
+
     def reembed_changed_files(self, root_dir: str):
-        """Re-embed only changed files"""
+        """Re-embed only changed files - properly delete old chunks first"""
         changed_files = self.detect_changes(root_dir)
         if not changed_files:
             print("No code changes detected.")
@@ -260,16 +318,24 @@ class RAGService:
 
         print(f"Re-embedding {len(changed_files)} modified files...")
         root = Path(root_dir)
+        
+        changed_file_paths = [str(file.relative_to(root)) for file in changed_files]
+        deleted_count = self._delete_chunks_by_source_files(changed_file_paths)
+        if deleted_count > 0:
+            print(f"Deleted {deleted_count} old chunks from modified files")
+        
         all_new_docs = []
-
         for file in changed_files:
             try:
                 content = file.read_text(encoding="utf-8")
-                docs = self.chunk_code_file(content)
-
-                for doc in docs:
+                docs = self.chunk_code_file(content, str(file.relative_to(root)))
+                
+                for i, doc in enumerate(docs):
                     doc.metadata["source_file"] = str(file.relative_to(root))
                     doc.metadata["file_hash"] = self._compute_hash(content)
+                    doc.metadata["chunk_id"] = self._generate_chunk_id(
+                        str(file.relative_to(root)), i, doc.page_content
+                    )
                 
                 all_new_docs.extend(docs)
             except Exception as e:
@@ -279,7 +345,7 @@ class RAGService:
         if all_new_docs:
             self.vector_store.add_documents(all_new_docs)
             self._rebuild_retrievers()
-            print(f"✓ Re-embedded {len(changed_files)} files ({len(all_new_docs)} chunks)")
+            print(f"✓ Re-embedded {len(changed_files)} files ({len(all_new_docs)} new chunks)")
 
     def _rebuild_retrievers(self):
         """Rebuild the hybrid retriever with all documents"""
@@ -298,3 +364,50 @@ class RAGService:
                 
         except Exception as e:
             print(f"Error rebuilding retrievers: {e}")
+
+    def cleanup_deleted_files(self, root_dir: str):
+        """Remove chunks from files that no longer exist"""
+        try:
+            root = Path(root_dir)
+            all_docs = self._get_all_documents()
+            
+            files_to_cleanup = []
+            for doc in all_docs:
+                source_file = doc.metadata.get("source_file")
+                if source_file:
+                    file_path = root / source_file
+                    if not file_path.exists() and source_file not in files_to_cleanup:
+                        files_to_cleanup.append(source_file)
+            
+            deleted_count = 0
+            for source_file in files_to_cleanup:
+                try:
+                    metadata_filter = Filter(
+                        must=[
+                            FieldCondition(
+                                key="source_file",
+                                match=MatchValue(value=source_file)
+                            )
+                        ]
+                    )
+                    
+                    self.qdrant_client.delete(
+                        collection_name=self.collection_name,
+                        points_selector=metadata_filter
+                    )
+                    
+                    deleted_count += 1
+                    print(f"Cleaned up chunks from deleted file: {source_file}")
+                    
+                except Exception as e:
+                    print(f"Error cleaning up {source_file}: {e}")
+                    continue
+            
+            if deleted_count > 0:
+                print(f"Cleaned up {deleted_count} orphaned files")
+            
+            return deleted_count
+            
+        except Exception as e:
+            print(f"Error cleaning up deleted files: {e}")
+            return 0
