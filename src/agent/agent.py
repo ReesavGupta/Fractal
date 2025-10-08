@@ -250,10 +250,9 @@ class CodingAgent:
         """Stream the agent's response with reasoning display"""
         if not self.graph:
             raise RuntimeError("Agent graph not initialized")
-
         if self.state is None:
             raise RuntimeError("State is not initialized")
-
+        
         # Add to memory
         if self.state.memory_manager:
             self.state.memory_manager.add_entry(
@@ -261,44 +260,50 @@ class CodingAgent:
                 user_input,
                 importance=0.9
             )
-
+        
         self.state.messages.append(HumanMessage(content=user_input))
-
         is_final_response = False
-
+        tool_calls_made = set()  # Track tool calls to avoid duplicates
+        
         async for event in self.graph.astream(self.state, stream_mode="updates"):
             for node_name, node_state in event.items():
                 if "messages" in node_state:
                     messages = node_state["messages"]
                     
                     for message in messages:
-                        # Handle tool calls
+                        # Handle tool calls from agent node
                         if isinstance(message, AIMessage) and hasattr(message, 'tool_calls') and message.tool_calls:
                             is_final_response = False
                             for tool_call in message.tool_calls:
-                                yield {
-                                    "type": "tool_call",
-                                    "content": tool_call.get("name", "unknown"),
-                                    "metadata": {
-                                        "args": tool_call.get("args", {}),
-                                        "id": tool_call.get("id", "")
+                                tool_call_id = tool_call.get("id", "")
+                                # Only yield if we haven't seen this tool call yet
+                                if tool_call_id not in tool_calls_made:
+                                    tool_calls_made.add(tool_call_id)
+                                    yield {
+                                        "type": "tool_call",
+                                        "content": tool_call.get("name", "unknown"),
+                                        "metadata": {
+                                            "args": tool_call.get("args", {}),
+                                            "id": tool_call_id
+                                        }
                                     }
-                                }
                         
-                        # Handle tool results
+                        # Handle tool results from tools node
                         elif isinstance(message, ToolMessage):
                             yield {
                                 "type": "tool_result",
                                 "content": str(message.content),
                                 "metadata": {
-                                    "tool_name": getattr(message, 'name', 'unknown')
+                                    "tool_name": getattr(message, 'name', 'unknown'),
+                                    "tool_call_id": getattr(message, 'tool_call_id', '')
                                 }
                             }
                         
-                        # Handle AI response
+                        # Handle final AI response (no tool calls)
                         elif isinstance(message, AIMessage) and message.content:
                             has_tool_calls = hasattr(message, 'tool_calls') and message.tool_calls
                             
+                            # Only treat as final response if from agent node and no tool calls
                             if not has_tool_calls and node_name == "agent":
                                 if not is_final_response:
                                     is_final_response = True

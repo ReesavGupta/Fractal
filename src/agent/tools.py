@@ -120,13 +120,64 @@ def search_fs_using_regex(dir_path: str, pattern: str, file_extension: str | Non
         regex = re.compile(pattern)
         matches = []
         
-        for root, _, files in os.walk(path):
+        # Define directories and files to exclude
+        excluded_dirs = {
+            '.git', '.svn', '.hg',  # Version control
+            'node_modules', 'bower_components',  # Package managers
+            '__pycache__', '.pytest_cache', '.mypy_cache',  # Python cache
+            '.venv', 'venv', 'env', '.env',  # Virtual environments
+            'dist', 'build', '.next', '.nuxt',  # Build outputs
+            'coverage', '.nyc_output',  # Test coverage
+            '.DS_Store', 'Thumbs.db',  # System files
+            'logs', 'log',  # Log files
+            'tmp', 'temp', '.tmp', '.temp',  # Temporary files
+            'cache', '.cache',  # Cache directories
+            'target',  # Rust/Java build
+            '.idea', '.vscode',  # IDE files
+            'vendor',  # PHP dependencies
+            '.terraform',  # Terraform
+            '.gradle',  # Gradle
+            'bin', 'obj',  # .NET build
+        }
+        
+        excluded_files = {
+            '.env', '.env.local', '.env.production', '.env.development',
+            '.gitignore', '.gitattributes', '.gitmodules',
+            'package-lock.json', 'yarn.lock', 'composer.lock',
+            '*.log', '*.tmp', '*.temp', '*.cache',
+            '.DS_Store', 'Thumbs.db', 'desktop.ini',
+            '*.pyc', '*.pyo', '*.pyd', '__pycache__',
+            '*.class', '*.jar', '*.war',
+            '*.exe', '*.dll', '*.so', '*.dylib',
+            '*.pdf', '*.doc', '*.docx', '*.xls', '*.xlsx',
+            '*.zip', '*.tar', '*.gz', '*.rar', '*.7z',
+            '*.jpg', '*.jpeg', '*.png', '*.gif', '*.bmp', '*.svg',
+            '*.mp3', '*.mp4', '*.avi', '*.mov', '*.wav',
+        }
+        
+        for root, dirs, files in os.walk(path):
+            # Filter out excluded directories
+            dirs[:] = [d for d in dirs if d not in excluded_dirs]
+            
             for file in files:
+                # Skip excluded files
+                if any(file.endswith(ext.replace('*', '')) for ext in excluded_files):
+                    continue
+                
+                # Skip hidden files (starting with .)
+                if file.startswith('.'):
+                    continue
+                
                 # Filter by extension if specified
                 if file_extension and not file.endswith(file_extension):
                     continue
                 
                 file_path = Path(root) / file
+                
+                # Skip if path contains excluded directories
+                path_parts = file_path.parts
+                if any(part in excluded_dirs for part in path_parts):
+                    continue
                 
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:

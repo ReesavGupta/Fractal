@@ -63,18 +63,18 @@ class FractalAgent:
         """Print agent's reasoning/thinking process"""
         print(f"\n{Colors.DIM}{Colors.BLUE}💭 Thinking: {Colors.RESET}{Colors.DIM}{text}{Colors.RESET}")
     
-    def print_tool_call(self, tool_name: str, result: str):
-        """Print tool call information"""
-        if len(result) > 200:
-            result_preview = result[:200] + "..."
-        else:
-            result_preview = result
-        print(f"{Colors.GREEN}✓{Colors.RESET} Result: {result_preview}")
-    
-    def print_tool_result(self, tool_name: str, result: str):
-        """Print tool execution result"""
-        result_preview = result
-        print(f"{Colors.GREEN}✓{Colors.RESET} {Colors.DIM}Result: {result_preview}{Colors.RESET}")
+    def print_tool_call(self, tool_name: str, args: dict):
+        """Print tool call information - shows what tool is being called"""
+        # Format args nicely - truncate long values
+        formatted_args = []
+        for k, v in args.items():
+            v_str = repr(v)
+            if len(v_str) > 60:
+                v_str = v_str[:60] + "..."
+            formatted_args.append(f"{k}={v_str}")
+        
+        args_str = ", ".join(formatted_args)
+        print(f"{Colors.CYAN}🔧 Calling: {Colors.BOLD}{tool_name}{Colors.RESET}{Colors.CYAN}({args_str}){Colors.RESET}")
     
     def print_response_start(self):
         """Print response header"""
@@ -236,7 +236,7 @@ class FractalAgent:
         except Exception as e:
             print(f"Unexpected error: {str(e)}")
             return False
-        
+
     async def handle_command(self, cmd):
         """Process user commands"""
         parts = cmd.strip().split()
@@ -301,20 +301,10 @@ class FractalAgent:
                 print("Agent not initialized.")
             else:
                 project_path = os.getcwd()
-                if not hasattr(self.agent, "rag_service"):
-                    embed_key = self.config['embedding_api_keys'].get('gemini')
-                    if not google_key:
-                        raise ValueError()
-                    google_api_key = google_key or embed_key
-                    embedding_model = GoogleGenerativeAIEmbeddings(
-                        model="gemini-embedding-001", google_api_key=SecretStr(google_api_key)
-                    )
-                    self.agent.rag_service = RAGService(
-                        llm=self.agent.client, 
-                        embedding_model=embedding_model,
-                        project_name=Path(project_path).name
-                    )
-                if self.agent.rag_service:
+                if not hasattr(self.agent, "rag_service") or not self.agent.rag_service:
+                    print("Error: RAG service not available")
+                else:
+                    print("Re-indexing codebase...")
                     self.agent.rag_service.reembed_changed_files(project_path)
 
         elif command == '/mcp':
@@ -370,8 +360,8 @@ class FractalAgent:
                         self.print_tool_call(tool_name, args)
                     
                     elif event_type == "tool_result":
-                        tool_name = metadata.get("tool_name", "unknown")
-                        self.print_tool_result(tool_name, content)
+                        # Don't display tool results anymore - only tool calls
+                        pass
                     
                     elif event_type == "response_start":
                         if not response_started:
@@ -439,7 +429,6 @@ class FractalAgent:
         finally:
             print()
 
-
 import asyncio
 
 async def periodic_reembedding(agent, path, interval=600):
@@ -447,10 +436,12 @@ async def periodic_reembedding(agent, path, interval=600):
     while agent.running:
         try:
             if hasattr(agent, "rag_service") and agent.rag_service:
-                # first we  cleanup deleted files
+                # First cleanup deleted files
                 agent.rag_service.cleanup_deleted_files(path)
-                # uske baad re-embed changed files
+                # Then re-embed changed files
                 agent.rag_service.reembed_changed_files(path)
         except Exception as e:
             print(f"Reembedding error: {e}")
         await asyncio.sleep(interval)
+
+        

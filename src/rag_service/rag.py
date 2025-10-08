@@ -55,6 +55,9 @@ class RAGService:
                     )
                 },
             )
+        
+        # FIXED: Always ensure payload indexes exist when initializing
+        self._ensure_payload_indexes()
 
         sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
 
@@ -70,6 +73,41 @@ class RAGService:
 
         self.sparse_retriever = None
         self.hybrid_retriever = None
+
+
+    def _ensure_payload_indexes(self):
+        """Ensure payload indexes exist for filtering"""
+        try:
+            # Get existing collection info
+            collection_info = self.qdrant_client.get_collection(self.collection_name)
+            existing_indexes = collection_info.payload_schema or {}
+            
+            # Create source_file index if it doesn't exist
+            if "source_file" not in existing_indexes:
+                try:
+                    self.qdrant_client.create_payload_index(
+                        collection_name=self.collection_name,
+                        field_name="source_file",
+                        field_schema=models.PayloadSchemaType.KEYWORD
+                    )
+                    print(f"Created payload index for 'source_file'")
+                except Exception as e:
+                    print(f"Info: Payload index for 'source_file' may already exist: {e}")
+            
+            # Create chunk_id index if it doesn't exist
+            if "chunk_id" not in existing_indexes:
+                try:
+                    self.qdrant_client.create_payload_index(
+                        collection_name=self.collection_name,
+                        field_name="chunk_id",
+                        field_schema=models.PayloadSchemaType.KEYWORD
+                    )
+                    print(f"Created payload index for 'chunk_id'")
+                except Exception as e:
+                    print(f"Info: Payload index for 'chunk_id' may already exist: {e}")
+                    
+        except Exception as e:
+            print(f"Warning: Could not verify/create payload indexes: {e}")
 
     # ------------------------------------------------------------------
     # Chunking
@@ -90,8 +128,6 @@ class RAGService:
             docs.append(doc)
         
         return docs
-    
-
     
     # ------------------------------------------------------------------
     # Initial indexing
@@ -277,9 +313,11 @@ class RAGService:
         try:
             deleted_count = 0
             
+            self._ensure_payload_indexes()
+            
             for source_file in source_files:
-                try:                    
-                    metadata_filter = Filter(
+                try:
+                    scroll_filter = Filter(
                         must=[
                             FieldCondition(
                                 key="source_file",
@@ -288,13 +326,36 @@ class RAGService:
                         ]
                     )
                     
-                    self.qdrant_client.delete(
-                        collection_name=self.collection_name,
-                        points_selector=metadata_filter
-                    )
+                    points_to_delete = []
+                    offset = None
                     
-                    deleted_count += 1
-                    print(f"Deleted chunks from file: {source_file}")
+                    while True:
+                        result = self.qdrant_client.scroll(
+                            collection_name=self.collection_name,
+                            scroll_filter=scroll_filter,
+                            limit=100,
+                            offset=offset,
+                            with_payload=False,
+                            with_vectors=False
+                        )
+                        
+                        points, offset = result
+                        
+                        if not points:
+                            break
+                            
+                        points_to_delete.extend([point.id for point in points])
+                        
+                        if offset is None:
+                            break
+                    
+                    if points_to_delete:
+                        self.qdrant_client.delete(
+                            collection_name=self.collection_name,
+                            points_selector=models.PointIdsList(points=points_to_delete)
+                        )
+                        deleted_count += 1
+                        print(f"Deleted {len(points_to_delete)} chunks from file: {source_file}")
                     
                 except Exception as e:
                     print(f"Error deleting chunks for {source_file}: {e}")
@@ -322,7 +383,7 @@ class RAGService:
         changed_file_paths = [str(file.relative_to(root)) for file in changed_files]
         deleted_count = self._delete_chunks_by_source_files(changed_file_paths)
         if deleted_count > 0:
-            print(f"Deleted {deleted_count} old chunks from modified files")
+            print(f"Deleted old chunks from {deleted_count} modified files")
         
         all_new_docs = []
         for file in changed_files:
@@ -369,6 +430,9 @@ class RAGService:
         """Remove chunks from files that no longer exist"""
         try:
             root = Path(root_dir)
+            
+            self._ensure_payload_indexes()
+
             all_docs = self._get_all_documents()
             
             files_to_cleanup = []
@@ -379,34 +443,14 @@ class RAGService:
                     if not file_path.exists() and source_file not in files_to_cleanup:
                         files_to_cleanup.append(source_file)
             
-            deleted_count = 0
-            for source_file in files_to_cleanup:
-                try:
-                    metadata_filter = Filter(
-                        must=[
-                            FieldCondition(
-                                key="source_file",
-                                match=MatchValue(value=source_file)
-                            )
-                        ]
-                    )
-                    
-                    self.qdrant_client.delete(
-                        collection_name=self.collection_name,
-                        points_selector=metadata_filter
-                    )
-                    
-                    deleted_count += 1
-                    print(f"Cleaned up chunks from deleted file: {source_file}")
-                    
-                except Exception as e:
-                    print(f"Error cleaning up {source_file}: {e}")
-                    continue
-            
-            if deleted_count > 0:
-                print(f"Cleaned up {deleted_count} orphaned files")
-            
-            return deleted_count
+            if files_to_cleanup:
+                deleted_count = self._delete_chunks_by_source_files(files_to_cleanup)
+                if deleted_count > 0:
+                    print(f"Cleaned up {deleted_count} orphaned files")
+                return deleted_count
+            else:
+                print("No orphaned files to clean up")
+                return 0
             
         except Exception as e:
             print(f"Error cleaning up deleted files: {e}")

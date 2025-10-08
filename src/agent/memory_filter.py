@@ -12,9 +12,9 @@ class MessageFilter:
             return True  # Always keep user messages in state
         
         if isinstance(message, AIMessage):
-            # Keep AI responses but truncate if too long
+            #  Keep AI responses but truncate if too long
             if len(message.content) > 1000:
-                message.content = message.content[:1000] + "... [truncated]"
+                message.content = message.content[:1000] + "... [truncated]" #type:ignore
             return True
         
         if isinstance(message, ToolMessage):

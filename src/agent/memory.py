@@ -29,7 +29,7 @@ class MemoryManager:
         self.memory_entries: List[MemoryEntry] = []
         self.current_size = 0
         
-    def add_entry(self, message_type: MessageType, content: str, metadata: Dict = None, importance: float = 0.5):
+    def add_entry(self, message_type: MessageType, content: str, metadata: Dict | None = None, importance: float = 0.5):
         """Add a new memory entry"""
         entry_id = hashlib.md5(f"{datetime.now()}{content}".encode()).hexdigest()[:8]
         size_bytes = len(content.encode('utf-8'))
