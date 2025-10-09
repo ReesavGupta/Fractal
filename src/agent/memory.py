@@ -1,8 +1,8 @@
+import json
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 from dataclasses import dataclass
 from enum import Enum
-import json
 import hashlib
 
 class MessageType(Enum):

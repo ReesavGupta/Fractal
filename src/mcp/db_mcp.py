@@ -3,8 +3,8 @@ Database MCP Tools for Fractal
 Supports MySQL, PostgreSQL, and MongoDB connections
 """
 from typing import Optional, Dict, Any, List
-from fastmcp import FastMCP
-import asyncio
+from langchain_core.tools import tool
+from langsmith import traceable
 import asyncpg
 import aiomysql
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -13,15 +13,16 @@ class DatabaseMCP:
     """MCP server for database operations"""
     
     def __init__(self):
-        self.mcp:FastMCP = FastMCP("Fractal Database Tools")
         self.connections: Dict[str, Any] = {}
-        self._setup_tools()
+        self.tools = self._create_tools()
     
-    def _setup_tools(self):
-        """Register all database tools"""
+    def _create_tools(self):
+        """Create all database tools as LangChain tools"""
+        tools_list = []
         
         # PostgreSQL Tools
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='connect_postgres')
         async def connect_postgres(
             connection_string: str,
             alias: str = "default"
@@ -36,7 +37,6 @@ class DatabaseMCP:
             Returns:
                 Connection status message
             """
-            
             try:
                 conn = await asyncpg.connect(connection_string)
                 self.connections[f"postgres_{alias}"] = conn
@@ -44,7 +44,8 @@ class DatabaseMCP:
             except Exception as e:
                 return f"Error connecting to PostgreSQL: {str(e)}"
         
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='query_postgres')
         async def query_postgres(
             query: str,
             alias: str = "default",
@@ -80,7 +81,8 @@ class DatabaseMCP:
             except Exception as e:
                 return f"Error executing query: {str(e)}"
         
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='execute_postgres')
         async def execute_postgres(
             query: str,
             alias: str = "default",
@@ -109,7 +111,8 @@ class DatabaseMCP:
                 return f"Error executing query: {str(e)}"
         
         # MySQL Tools
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='connect_mysql')
         async def connect_mysql(
             host: str,
             user: str,
@@ -132,7 +135,6 @@ class DatabaseMCP:
             Returns:
                 Connection status message
             """
-            
             try:
                 pool = await aiomysql.create_pool(
                     host=host,
@@ -146,7 +148,8 @@ class DatabaseMCP:
             except Exception as e:
                 return f"Error connecting to MySQL: {str(e)}"
         
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='query_mysql')
         async def query_mysql(
             query: str,
             alias: str = "default"
@@ -179,7 +182,8 @@ class DatabaseMCP:
             except Exception as e:
                 return f"Error executing query: {str(e)}"
         
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='execute_mysql')
         async def execute_mysql(
             query: str,
             alias: str = "default"
@@ -209,7 +213,8 @@ class DatabaseMCP:
                 return f"Error executing query: {str(e)}"
         
         # MongoDB Tools
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='connect_mongodb')
         async def connect_mongodb(
             connection_string: str,
             alias: str = "default"
@@ -224,7 +229,6 @@ class DatabaseMCP:
             Returns:
                 Connection status message
             """
-            
             try:
                 client = AsyncIOMotorClient(connection_string)
                 # Test connection
@@ -234,7 +238,8 @@ class DatabaseMCP:
             except Exception as e:
                 return f"Error connecting to MongoDB: {str(e)}"
         
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='query_mongodb')
         async def query_mongodb(
             database: str,
             collection: str,
@@ -274,7 +279,8 @@ class DatabaseMCP:
             except Exception as e:
                 return f"Error executing query: {str(e)}"
         
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='insert_mongodb')
         async def insert_mongodb(
             database: str,
             collection: str,
@@ -307,7 +313,8 @@ class DatabaseMCP:
             except Exception as e:
                 return f"Error inserting document: {str(e)}"
         
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='update_mongodb')
         async def update_mongodb(
             database: str,
             collection: str,
@@ -342,7 +349,8 @@ class DatabaseMCP:
             except Exception as e:
                 return f"Error updating documents: {str(e)}"
         
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='delete_mongodb')
         async def delete_mongodb(
             database: str,
             collection: str,
@@ -376,7 +384,8 @@ class DatabaseMCP:
                 return f"Error deleting documents: {str(e)}"
         
         # Connection management
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='list_connections')
         async def list_connections() -> str:
             """
             List all active database connections.
@@ -394,7 +403,8 @@ class DatabaseMCP:
             
             return "\n".join(output)
         
-        @self.mcp.tool()
+        @tool
+        @traceable('tool', name='disconnect_database')
         async def disconnect_database(
             db_type: str,
             alias: str = "default"
@@ -428,11 +438,29 @@ class DatabaseMCP:
                 return f"✓ Disconnected from {db_type} ({alias})"
             except Exception as e:
                 return f"Error disconnecting: {str(e)}"
+        
+        # Add all tools to the list
+        tools_list.extend([
+            connect_postgres,
+            query_postgres,
+            execute_postgres,
+            connect_mysql,
+            query_mysql,
+            execute_mysql,
+            connect_mongodb,
+            query_mongodb,
+            insert_mongodb,
+            update_mongodb,
+            delete_mongodb,
+            list_connections,
+            disconnect_database
+        ])
+        
+        return tools_list
     
-    async def get_tools(self):
-        """Get all registered tools as LangChain-compatible tools"""
-        return await self.mcp._list_tools()
-        # return self.mcp.list_tools()
+    def get_tools_sync(self):
+        """Get all registered tools synchronously"""
+        return self.tools
     
     async def cleanup(self):
         """Close all database connections"""

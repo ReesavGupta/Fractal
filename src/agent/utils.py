@@ -226,19 +226,9 @@ def get_tool_list(include_db_tools: bool = False):
     # Add database tools if requested and available
     if include_db_tools and _db_mcp_ref:
         try:
-            # Get FastMCP tools and convert them to LangChain tools
-            mcp_tools =_db_mcp_ref.get_tools()
-            
-            # FastMCP tools are already in LangChain format
-            for mcp_tool in mcp_tools:
-                # Wrap MCP tool in a traceable wrapper
-                @tool
-                @traceable('tool', name=mcp_tool.name)
-                async def db_tool_wrapper(*args, _tool=mcp_tool, **kwargs):
-                    return await _tool.ainvoke(*args, **kwargs)
-                db_tool_wrapper.name = mcp_tool.name
-                db_tool_wrapper.description = mcp_tool.description
-                base_tools.append(db_tool_wrapper)
+            # Get database tools synchronously
+            db_tools = _db_mcp_ref.get_tools_sync()
+            base_tools.extend(db_tools)
         except Exception as e:
             print(f"Warning: Could not load database tools: {e}")
     
