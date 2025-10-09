@@ -3,24 +3,40 @@ from typing import Optional, Literal, AsyncGenerator
 from src.agent.memory import MemoryManager, MessageType
 from src.agent.memory_filter import MessageFilter
 from src.agent.utils import set_memory_manager
-from src.agent.utils import get_tool_list
+from src.agent.utils import get_tool_list, set_db_mcp
 from langgraph.prebuilt import ToolNode
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from src.agent.state import IFractalState
 from src.rag_service.rag import RAGService
+from src.mcp.db_mcp import get_db_mcp
 
 class CodingAgent:
-    def __init__(self, llm: str, api_key: Optional[str] = None, verbose: bool = False, rag_service: RAGService | None = None) -> None:
+    def __init__(self, llm: str, api_key: Optional[str] = None, verbose: bool = False, rag_service: RAGService | None = None, enable_db_tools: bool = False) -> None:
         self.llm_provider = llm
         self.verbose = verbose
         self.client = None
         self.model_name = None
+        self.enable_db_tools = enable_db_tools
+
+        ##############################################################
+        self.db_mcp = None
+        if enable_db_tools:
+            try:
+                self.db_mcp = get_db_mcp()
+                set_db_mcp(self.db_mcp)
+                if self.verbose:
+                    print("Database MCP initialized")
+            except ImportError:
+                print("Warning: FastMCP not installed. Database tools disabled.")
+                print("Install with: pip install fastmcp asyncpg aiomysql motor")
+                self.enable_db_tools = False
+        ##############################################################
 
         ##############################################################
         # binding with tools
-        self.tools = get_tool_list()
+        self.tools = get_tool_list(include_db_tools=enable_db_tools) # if we need db tools only then get them else no
         self.rag_service = rag_service 
         ##############################################################
         self.graph = None
@@ -65,7 +81,7 @@ class CodingAgent:
             api_key = api_key or os.getenv("GEMINI_API_KEY")
             if not api_key:
                 raise ValueError("Gemini API key not found. Set GEMINI_API_KEY environment variable.")
-            self.client = init_chat_model("gemini-2.0-flash", model_provider="google_vertexai", temperature=0.8, api_key=api_key)
+            self.client = init_chat_model("gemini-2.0-flash", model_provider="google_genai", temperature=0.8, api_key=api_key)
             self.model_name = "gemini-2.0-flash"
         else:
             raise ValueError(f"Unsupported LLM provider: {llm}")
@@ -74,7 +90,8 @@ class CodingAgent:
          # binding with tools
         self.client_with_tools = self.client.bind_tools(self.tools)
         if self.verbose:
-            print(f"Initialized {self.model_name} with {len(self.tools)} tools")
+            db_status = f" (including {len([t for t in self.tools if 'postgres' in t.name or 'mysql' in t.name or 'mongodb' in t.name])} DB tools)" if self.enable_db_tools else ""
+            print(f"Initialized {self.model_name} with {len(self.tools)} tools{db_status}")
         ####################################################################################################################
 
     def _build_graph(self):
@@ -96,11 +113,38 @@ class CodingAgent:
             ##############################################################
             ##############################################################
 
-            system_message = SystemMessage(content=f"""You are Fractal, an expert coding assistant with access to file system tools and RAG-powered codebase search.
+            db_tools_info = ""
+            if self.enable_db_tools:
+                db_tools_info = """
+                
+                DATABASE TOOLS:
+                Connection Management:
+                - connect_postgres, connect_mysql, connect_mongodb: Establish database connections
+                - list_connections: View all active connections
+                - disconnect_database: Close a connection
+                
+                PostgreSQL:
+                - query_postgres: Execute SELECT queries
+                - execute_postgres: Execute INSERT/UPDATE/DELETE queries
+                
+                MySQL:
+                - query_mysql: Execute SELECT queries
+                - execute_mysql: Execute INSERT/UPDATE/DELETE queries
+                
+                MongoDB:
+                - query_mongodb: Query documents
+                - insert_mongodb: Insert documents
+                - update_mongodb: Update documents
+                - delete_mongodb: Delete documents
+                
+                Always connect to the database first before executing queries!
+                """
+            system_message = SystemMessage(content=f"""You are Fractal, an expert coding assistant with access to file system tools, RAG-powered codebase search, and database management tools.
 
                 TOOL SELECTION STRATEGY:
                 - For SIMPLE queries: Use fast tools like read_file_tool, write_file_tool, search_files_tool
                 - For COMPLEX queries: Use search_codebase_tool (RAG)
+                - For DATABASE queries: Use database tools (connect first, then query)
                 
                 Available tools:
                 - read_file_tool, write_file_tool, edit_file_tool: Fast file operations
@@ -109,15 +153,17 @@ class CodingAgent:
                 - search_codebase_tool: Advanced semantic codebase search (SLOW - use only for complex queries)
                 - search_memory_tool: Search through conversation history
                 - create_directory_tool, delete_file_tool: File management
+                {db_tools_info}
 
                 {memory_context}
 
                 WORKFLOW:
                 1. For simple tasks: Use appropriate fast tools directly
                 2. For complex tasks: Use search_codebase_tool or search_memory_tool first
-                3. Break down complex tasks into steps
-                4. Execute necessary operations
-                5. Provide clear explanations""")
+                3. For database tasks: Connect to database first, then execute queries
+                4. Break down complex tasks into steps
+                5. Execute necessary operations
+                6. Provide clear explanations""")
             
             # Filter messages for LLM state (remove tool results stored in memory)
             messages = state.messages

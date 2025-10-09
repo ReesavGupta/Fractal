@@ -13,6 +13,7 @@ from src.agent.tools import (
 
 _rag_service_ref = None
 _memory_manager_ref = None
+_db_mcp_ref = None
 
 def set_rag_service(rag_service):
     """Set the global RAG service reference for tools to use"""
@@ -24,9 +25,17 @@ def set_memory_manager(memory_manager):
     global _memory_manager_ref
     _memory_manager_ref = memory_manager
 
-def get_tool_list():
+def set_db_mcp(db_mcp):
+    """Set the global DB MCP reference"""
+    global _db_mcp_ref
+    _db_mcp_ref = db_mcp
+
+def get_tool_list(include_db_tools: bool = False):
     """
     Convert tool functions to LangChain tool objects with proper schemas.
+    
+    Args:
+        include_db_tools: If True, include database MCP tools
     """
 
     @tool
@@ -200,8 +209,9 @@ def get_tool_list():
             
         except Exception as e:
             return f"Error searching memory: {str(e)}"
-        
-    return [
+    
+    # Base tools
+    base_tools = [
         read_file_tool,
         write_file_tool,
         read_directory_tool,
@@ -212,3 +222,24 @@ def get_tool_list():
         search_codebase_tool,
         search_memory_tool
     ]
+    
+    # Add database tools if requested and available
+    if include_db_tools and _db_mcp_ref:
+        try:
+            # Get FastMCP tools and convert them to LangChain tools
+            mcp_tools =_db_mcp_ref.get_tools()
+            
+            # FastMCP tools are already in LangChain format
+            for mcp_tool in mcp_tools:
+                # Wrap MCP tool in a traceable wrapper
+                @tool
+                @traceable('tool', name=mcp_tool.name)
+                async def db_tool_wrapper(*args, _tool=mcp_tool, **kwargs):
+                    return await _tool.ainvoke(*args, **kwargs)
+                db_tool_wrapper.name = mcp_tool.name
+                db_tool_wrapper.description = mcp_tool.description
+                base_tools.append(db_tool_wrapper)
+        except Exception as e:
+            print(f"Warning: Could not load database tools: {e}")
+    
+    return base_tools

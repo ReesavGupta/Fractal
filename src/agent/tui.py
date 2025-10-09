@@ -51,13 +51,15 @@ class FractalAgent:
         self.config= {
             'llm' : None,
             'verbose': False,
-            'mcp': [],
+            'enable_db_tools': False,
+            'db_connections': {},  # Store connection strings
             'api_keys': {},
             'embedding_api_keys': {} 
         }
         self.session= None 
         self.running = True
         self.agent = None
+        self.rag_service = None
 
     def print_reasoning(self, text: str):
         """Print agent's reasoning/thinking process"""
@@ -82,9 +84,10 @@ class FractalAgent:
     
     def setup_tui(self):
         commands = WordCompleter([
-            '/llm', '/verbose', '/mcp', '/config', '/clear', '/help', '/quit',
-            '/session', '/apikey', '/embedkey',
-            'openai', 'gemini', 'claude', 'postgresql', 'mongodb'
+            '/llm', '/verbose', '/config', '/clear', '/help', '/quit',
+            '/session', '/apikey', '/embedkey', '/reembed',
+            '/dbtools', '/dbconnect', '/dblist', '/dbdisconnect',
+            'openai', 'gemini', 'claude', 'postgresql', 'mysql', 'mongodb'
         ], ignore_case=True)
 
         style = Style.from_dict({
@@ -127,24 +130,31 @@ class FractalAgent:
 ├─────────────────────────────────────────────────────────────┤
 │ /llm <provider>    - Set LLM provider                       │
 │                      Options: openai, gemini, claude        │
-|-------------------------------------------------------------|
+│─────────────────────────────────────────────────────────────│
 │ /verbose           - Toggle verbose output                  │
-|-------------------------------------------------------------|
-│ /mcp <add|remove> <db> - Manage MCP databases               │
-│                      Options: postgresql, mongodb           │
-|-------------------------------------------------------------|
+│─────────────────────────────────────────────────────────────│
+│ /dbtools           - Toggle database tools                  │
+│─────────────────────────────────────────────────────────────│
+│ /dbconnect <type> <connection_string> [alias]               │
+│                    - Add database connection                │
+│                      Types: postgres, mysql, mongodb        │
+│─────────────────────────────────────────────────────────────│
+│ /dblist            - List saved database connections        │
+│─────────────────────────────────────────────────────────────│
+│ /dbdisconnect <type> [alias] - Remove database connection   │
+│─────────────────────────────────────────────────────────────│
 │ /config            - Show current configuration             │
-|-------------------------------------------------------------|
+│─────────────────────────────────────────────────────────────│
 │ /apikey <provider> <key>  - Set API key for LLM provider    │
-|-------------------------------------------------------------|
-│ /embedkey <provider> <key> - Set API key for embedding model│
-|-------------------------------------------------------------|
+│─────────────────────────────────────────────────────────────│
+│ /embedkey <provider> <key> - Set API key for embedding      │
+│─────────────────────────────────────────────────────────────│
 │ /reembed           - Re-Index the project codebase          │
-|-------------------------------------------------------------|
+│─────────────────────────────────────────────────────────────│
 │ /clear             - Clear screen                           │
-|-------------------------------------------------------------|
+│─────────────────────────────────────────────────────────────│
 │ /help              - Show this help message                 │
-|-------------------------------------------------------------|
+│─────────────────────────────────────────────────────────────│
 │ /exit or /quit     - Exit Fractal                           │
 └─────────────────────────────────────────────────────────────┘
         """
@@ -155,8 +165,11 @@ class FractalAgent:
         print("\n┌─────────────── Current Configuration ───────────────┐")
         print(f"│ LLM Provider: {self.config['llm'] or 'Not set':<37} │")
         print(f"│ Verbose Mode: {'Enabled' if self.config['verbose'] else 'Disabled':<37} │")
-        mcp_str = ', '.join(self.config['mcp']) if self.config['mcp'] else 'None'
-        print(f"│ MCP Databases: {mcp_str:<36} │")
+        print(f"│ Database Tools: {'Enabled' if self.config['enable_db_tools'] else 'Disabled':<35} │")
+        
+        db_count = len(self.config['db_connections'])
+        print(f"│ DB Connections: {db_count:<36} │")
+        
         agent_status = 'Initialized' if self.agent else 'Not initialized'
         print(f"│ Agent Status: {agent_status:<37} │")
         print("└─────────────────────────────────────────────────────┘\n")
@@ -220,13 +233,32 @@ class FractalAgent:
                 llm=self.config['llm'],
                 api_key=api_key,
                 verbose=self.config['verbose'],
-                rag_service=rag_service
+                rag_service=rag_service,
+                enable_db_tools=self.config['enable_db_tools']
             )
 
             if rag_service:
                 set_rag_service(rag_service)
 
             print(f"Agent initialized successfully!")
+
+            # Auto-connect to saved databases if DB tools are enabled
+            if self.config['enable_db_tools'] and self.config['db_connections']:
+                print(f"\nAuto-connecting to {len(self.config['db_connections'])} saved database(s)...")
+                for conn_key, conn_string in self.config['db_connections'].items():
+                    db_type, alias = conn_key.split('_', 1)
+                    try:
+                        # Use the agent to connect
+                        if db_type == 'postgres':
+                            result = await self.agent.ainvoke(f"Connect to PostgreSQL using connection string: {conn_string} with alias {alias}")
+                        elif db_type == 'mysql':
+                            result = await self.agent.ainvoke(f"Connect to MySQL using connection string: {conn_string} with alias {alias}")
+                        elif db_type == 'mongodb':
+                            result = await self.agent.ainvoke(f"Connect to MongoDB using connection string: {conn_string} with alias {alias}")
+                        print(f"  • {db_type.upper()} ({alias}): Connected")
+                    except Exception as e:
+                        print(f"  • {db_type.upper()} ({alias}): Failed - {e}")
+            
             return True
 
         except ValueError as e:
@@ -263,6 +295,59 @@ class FractalAgent:
             self.config['verbose'] = not self.config['verbose']
             status = "enabled" if self.config['verbose'] else "disabled"
             print(f"Verbose mode {status}")
+
+        elif command == '/dbtools':
+            self.config['enable_db_tools'] = not self.config['enable_db_tools']
+            status = "enabled" if self.config['enable_db_tools'] else "disabled"
+            print(f"Database tools {status}")
+            if self.agent:
+                print("Note: Reinitialize agent to apply database tools changes")
+
+        elif command == '/dbconnect':
+            if len(parts) < 3:
+                print("Usage: /dbconnect <type> <connection_string> [alias]")
+                print("Examples:")
+                print("  /dbconnect postgres postgresql://user:pass@localhost:5432/mydb prod")
+                print("  /dbconnect mysql mysql://user:pass@localhost:3306/mydb")
+                print("  /dbconnect mongodb mongodb://localhost:27017/mydb local")
+            else:
+                db_type = parts[1].lower()
+                conn_string = parts[2]
+                alias = parts[3] if len(parts) > 3 else "default"
+                
+                if db_type not in ['postgres', 'mysql', 'mongodb']:
+                    print("Error: Supported types are postgres, mysql, mongodb")
+                else:
+                    conn_key = f"{db_type}_{alias}"
+                    self.config['db_connections'][conn_key] = conn_string
+                    print(f"✓ Saved {db_type.upper()} connection '{alias}'")
+                    
+                    if not self.config['enable_db_tools']:
+                        print("Note: Database tools are disabled. Use /dbtools to enable")
+
+        elif command == '/dblist':
+            if not self.config['db_connections']:
+                print("No database connections saved")
+            else:
+                print("\nSaved Database Connections:")
+                for conn_key in self.config['db_connections'].keys():
+                    db_type, alias = conn_key.split('_', 1)
+                    print(f"  • {db_type.upper()} - {alias}")
+                print()
+
+        elif command == '/dbdisconnect':
+            if len(parts) < 2:
+                print("Usage: /dbdisconnect <type> [alias]")
+            else:
+                db_type = parts[1].lower()
+                alias = parts[2] if len(parts) > 2 else "default"
+                conn_key = f"{db_type}_{alias}"
+                
+                if conn_key in self.config['db_connections']:
+                    del self.config['db_connections'][conn_key]
+                    print(f"✓ Removed {db_type.upper()} connection '{alias}'")
+                else:
+                    print(f"No connection found for {db_type} with alias '{alias}'")
 
         elif command == '/apikey':
             if len(parts) < 3:
@@ -306,29 +391,6 @@ class FractalAgent:
                 else:
                     print("Re-indexing codebase...")
                     self.agent.rag_service.reembed_changed_files(project_path)
-
-        elif command == '/mcp':
-            if len(parts) < 3:
-                print("Error: Usage: /mcp <add|remove> <postgresql|mongodb>")
-            else:
-                action = parts[1].lower()
-                db = parts[2].lower()
-                if db not in ['postgresql', 'mongodb']:
-                    print("Error: Invalid database. Choose from: postgresql, mongodb")
-                elif action == 'add':
-                    if db not in self.config['mcp']:
-                        self.config['mcp'].append(db)
-                        print(f"Added {db} to MCP")
-                    else:
-                        print(f"{db} is already in MCP")
-                elif action == 'remove':
-                    if db in self.config['mcp']:
-                        self.config['mcp'].remove(db)
-                        print(f"Removed {db} from MCP")
-                    else:
-                        print(f"{db} is not in MCP")
-                else:
-                    print("Error: Invalid action. Use 'add' or 'remove'")
 
         elif not command.startswith('/'):
             # Process user query through agent with streaming
