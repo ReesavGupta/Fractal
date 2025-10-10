@@ -49,7 +49,7 @@ class DatabaseMCP:
         async def query_postgres(
             query: str,
             alias: str = "default",
-            params: Optional[List[Any]] = None
+            params: Optional[List[str]] = None
         ) -> str:
             """
             Execute a SELECT query on PostgreSQL.
@@ -86,7 +86,7 @@ class DatabaseMCP:
         async def execute_postgres(
             query: str,
             alias: str = "default",
-            params: Optional[List[Any]] = None
+            params: Optional[List[str]] = None
         ) -> str:
             """
             Execute an INSERT/UPDATE/DELETE query on PostgreSQL.
