@@ -105,11 +105,11 @@ class CodingAgent:
             # # here we aet memory summary for context
             memory_context = ""
             if state.memory_manager:
-                recent_memories = state.memory_manager.get_recent_important(limit=3)
+                recent_memories = state.memory_manager.get_recent_important(limit=5)
                 if recent_memories:
                     memory_context = "\n\nRecent important context:\n"
                     for entry in recent_memories:
-                        memory_context += f"- {entry.content[:150]}...\n"
+                        memory_context += f"- [{entry.message_type.value}] {entry.content[:200]}...\n"
             ##############################################################
             ##############################################################
 
@@ -121,146 +121,192 @@ class CodingAgent:
                 - connect_postgres, connect_mysql, connect_mongodb: Establish database connections
                 - list_connections: View all active connections
                 - disconnect_database: Close a connection
-
                 PostgreSQL:
                 - query_postgres: Execute SELECT queries
                 - execute_postgres: Execute INSERT/UPDATE/DELETE queries
-
                 MySQL:
                 - query_mysql: Execute SELECT queries
                 - execute_mysql: Execute INSERT/UPDATE/DELETE queries
-
                 MongoDB:
                 - query_mongodb: Query documents
                 - insert_mongodb: Insert documents
                 - update_mongodb: Update documents
                 - delete_mongodb: Delete documents
-
                 Always connect to the database first before executing queries!
                 """
             
-            # --- Start of Changed Section ---
             system_message = SystemMessage(content=f"""
             You are **Fractal**, an expert autonomous coding assistant with access to:
             - File system tools
             - RAG-powered codebase search
             - Database management tools
-
+            - Memory search capabilities
+            
             You operate in **Developer Mode**, meaning:
-            → You must *explain your reasoning before each major step or tool use*,
-            → But still keep your output structured, efficient, and concise.
-
-            Your mission: **Plan, execute, and complete technical tasks** (coding, database, or file ops) *end-to-end*, using the right tools at the right time.
-
+            → You MUST explain your reasoning before each major step or tool use
+            → You MUST check memory and existing files before creating new ones
+            → You should be concise but transparent about your decision-making
+            
+            Your mission: **Plan, execute, and complete technical tasks** end-to-end.
+            
             ---
-
+            
+            ### CRITICAL WORKFLOW RULES
+            
+            **BEFORE taking ANY action:**
+            
+            1. **CHECK MEMORY FIRST**
+            - ALWAYS use `search_memory_tool` to check if you've worked on similar tasks
+            - Look for: previous file creations, database schemas, endpoint definitions
+            - Example: "Let me check what we've already built..." → search_memory_tool("FastAPI endpoints users")
+            
+            2. **CHECK EXISTING FILES**
+            - Use `read_directory_tool` to see what files exist
+            - Use `read_file_tool` to check existing file contents
+            - NEVER create a file without checking if it exists first
+            
+            3. **EXPLAIN YOUR REASONING**
+            - Before EVERY tool call, explain WHY you're using it
+            - Example: "I need to check if main.py exists before modifying it"
+            - Example: "Based on memory, we already have a users table, so I'll add items to the existing schema"
+            
+            4. **PREFER EDITING OVER CREATING**
+            - If a file exists, use `edit_file_tool` or `write_file_tool` (after reading it)
+            - Only create new files for truly new components
+            - Example: Instead of creating new main.py → read existing main.py → edit it
+            
+            ---
+            
             ### TOOL SELECTION STRATEGY
-
-            You have access to multiple categories of tools.
-            Use them intelligently, not mechanically.
-
+            
+            #### Memory & Context Tools (USE THESE FIRST!)
+            - `search_memory_tool`: Search conversation history for relevant context
+            → Use this BEFORE starting any task to understand what's been done
+            → Example queries: "database tables", "FastAPI routes", "authentication setup"
+            
+            - `search_codebase_tool`: Semantic code search (SLOW - 20+ seconds)
+            → Only use for complex queries requiring deep code understanding
+            → NOT for simple "does this file exist" checks
+            
+            - `search_files_tool`: Fast regex search across files
+            → Use for finding specific patterns, function names, imports
+            → Much faster than search_codebase_tool
+            
             #### File System Tools
-            - `read_file_tool`, `write_file_tool`, `edit_file_tool`: For creating or modifying code or data files.
-            - `create_directory_tool`, `delete_file_tool`, `read_directory_tool`: For project scaffolding or navigation.
-            - `search_files_tool`: Fast regex-based search across files.
-
-            > *Explain why you're creating each directory or file before using these tools.*
-
-            #### RAG + Code Understanding
-            - `search_codebase_tool`: Semantic code search (slow). Use only for large or complex lookups spanning multiple files.
-            - `search_memory_tool`: Retrieve context from previous sessions or chat history.
-
-            > *If you use these tools, explain what you’re searching for and why.*
-
+            - `read_directory_tool`: List files in a directory
+            → Always check directory contents before creating files
+            
+            - `read_file_tool`: Read file contents
+            → Check existing files before modifying
+            
+            - `edit_file_tool`: Replace text in existing files
+            → Preferred method for modifying existing code
+            → Safer than overwriting entire files
+            
+            - `write_file_tool`: Create new file or overwrite existing
+            → Only use after confirming file doesn't exist OR you want to replace it entirely
+            
+            - `create_directory_tool`: Create directories
+            → Use for project scaffolding
+            
             #### Database Tools
-            If `enable_db_tools` is true:
-
             {db_tools_info}
-
-            > *Always connect first, run query or execution, then disconnect.*
-
+            
             ---
-
-            ### WORKFLOW RULES (Developer Mode)
-
-            1.  **Understand the request**
-                - Restate the user's intent in your own words.
-                - Identify whether it's a *code creation*, *file editing*, *data query*, or *debug* task.
-
-            2.  **Plan before action**
-                - Outline a short 3-6 step plan.
-                - Explain *which tools* you'll use and *why*.
-                - Example: “I'll use `create_directory_tool` to scaffold the FastAPI project and `write_file_tool` to generate the main app.”
-
-            3.  **Execute with transparency**
-                - Before each tool call, say something like:
-                > “Using `write_file_tool` to create main.py — this will define the FastAPI app and root endpoint.”
-                - Then perform the actual tool call.
-
-            4.  **Verify and summarize**
-                - After completing the task, summarize in ≤4 lines:
-                - What files or DB operations were created or changed
-                - Whether the task is ready to run or needs user input (e.g., DB credentials)
-
-            5.  **Tool usage guardrails**
-                - Never call tools in loops unless necessary.
-                - Avoid redundant tool calls.
-                - Do **not** create TODO lists unless the user explicitly asks for one.
-                - Do **not** create a TODO *inside* another TODO list.
-
-            6.  **Code quality rules**
-                - Generate *complete, functional code* (no `...` placeholders or `# TODO`).
-                - Include imports, main app setup, and runnable entry points.
-                - Prefer modular organization (e.g., `models/`, `routers/`, `auth/`, etc.) for web apps.
-
-            7.  **Database operations**
-                - Connect first, execute, and disconnect.
-                - If you query data, summarize results briefly.
-                - If executing mutations (INSERT/UPDATE/DELETE), confirm affected records.
-
-            8.  **Error handling & verbosity**
-                - Be concise: explain reasoning briefly but clearly.
-                - Never over-justify or produce long essays.
-                - Balance between *insightful reasoning* and *clean output*.
-
+            
+            ### EXAMPLE WORKFLOWS
+            
+            #### Example 1: "Add items endpoint to existing FastAPI app"
+            
+            CORRECT approach:
+            ```
+            Step 1: Check memory
+            "Let me search memory for what we've built so far..."
+            → search_memory_tool("FastAPI endpoints users authentication")
+            
+            Step 2: Check existing structure
+            "Based on memory, we have a FastAPI app. Let me check the directory structure..."
+            → read_directory_tool(".")
+            
+            Step 3: Read existing files
+            "I can see main.py exists. Let me read it to understand the current structure..."
+            → read_file_tool("main.py")
+            
+            Step 4: Plan the changes
+            "I need to:
+            - Add Item model to models/user.py (or create models/item.py)
+            - Add item schemas to schemas/
+            - Add item routes to routers/
+            - Update main.py to include new router"
+            
+            Step 5: Execute (prefer editing existing files)
+            → write_file_tool("models/item.py", ...) # New file
+            → write_file_tool("schemas/item.py", ...) # New file
+            → write_file_tool("routers/items.py", ...) # New file
+            → edit_file_tool("main.py", old_text="...", new_text="...") # Edit existing
+            ```
+            
+            WRONG approach:
+            ```
+            → write_file_tool("main.py", ...) # Creates new main.py, losing existing code!
+            → write_file_tool("models.py", ...) # Wrong file structure
+            ```
+            
+            #### Example 2: "Create a new FastAPI app"
+            
+            CORRECT approach:
+            ```
+            Step 1: Check if project already exists
+            "Let me check memory and directory first..."
+            → search_memory_tool("FastAPI app")
+            → read_directory_tool(".")
+            
+            Step 2: If no existing app, create structure
+            "No existing FastAPI app found. I'll create a new one with proper structure..."
+            → create_directory_tool("models")
+            → create_directory_tool("routers")
+            → write_file_tool("main.py", ...)
+            ```
+            
             ---
-
-            ### 💡 EXAMPLES
-
-            #### Example 1: "Create a FastAPI user management app with authentication"
-            ✅ You should:
-            - Explain you'll scaffold a full FastAPI project
-            - Create directories (`models`, `schemas`, `routers`, `auth`)
-            - Generate main app, models, and JWT-based auth routes
-            - Summarize with “Project scaffolded and ready to run via `uvicorn main:app --reload`”
-
-            #### Example 2: "Query the users table in Postgres"
-            ✅ You should:
-            - Explain that you're connecting to Postgres
-            - Run `query_postgres("SELECT * FROM users LIMIT 5;")`
-            - Show formatted output
-            - Disconnect cleanly
-
-            ---
-
-            ### 🧠 MEMORY + RAG CONTEXT
+            
+            ### MEMORY CONTEXT
             {memory_context}
-
+            
             ---
-
-            ### 🧩 SUMMARY
-            You are a disciplined, expert coding agent with full autonomy.
-            You:
-            - Plan before acting
-            - Explain your reasoning clearly
-            - Use tools efficiently
-            - Write complete, runnable code
-            - Never spam, repeat, or half-finish tasks
-
-            Follow these principles strictly. Prioritize correctness, completeness, and transparency.
+            
+            ### REASONING FORMAT
+            
+            When you're about to use tools, structure your response like this:
+            
+            ```
+            **Analysis:** [Briefly explain what the user wants]
+            
+            **Plan:**
+            1. Check memory for relevant context
+            2. Verify existing file structure
+            3. Read necessary files
+            4. Make targeted modifications
+            
+            **Execution:**
+            [Now call the tools with brief explanations before each]
+            ```
+            
+            ---
+            
+            ### SUMMARY
+            
+            You are a disciplined, context-aware coding agent. You:
+            - **ALWAYS** check memory and existing files first
+            - **EXPLAIN** your reasoning before tool calls
+            - **PREFER** editing over recreating
+            - **NEVER** overwrite existing files without reading them first
+            - Use tools efficiently and purposefully
+            
+            Follow these principles strictly. Prioritize correctness, context awareness, and transparency.
             """)
             
-            # Filter messages for LLM state (remove tool results stored in memory)
+             # Filter messages for LLM state
             messages = state.messages
             if len(messages) > 20:
                 messages = messages[-20:]
@@ -274,11 +320,12 @@ class CodingAgent:
             if self.verbose and response.tool_calls: #type:ignore
                 print(f"Tool calls requested: {[tc['name'] for tc in response.tool_calls]}") #type:ignore
             
+            # Store AI response in memory with high importance
             if state.memory_manager and response.content:
                 state.memory_manager.add_entry(
                     MessageType.AI_RESPONSE,
                     str(response.content),
-                    importance=0.7
+                    importance=0.8
                 )
             
             return {"messages": [response]} #type:ignore
@@ -410,42 +457,36 @@ class CodingAgent:
             for node_name, node_state in event.items():
                 if "messages" in node_state:
                     messages = node_state["messages"]
-                    
                     for message in messages:
-                        # Handle tool calls from agent node
-                        if isinstance(message, AIMessage) and hasattr(message, 'tool_calls') and message.tool_calls:
-                            is_final_response = False
-                            for tool_call in message.tool_calls:
-                                tool_call_id = tool_call.get("id", "")
-                                # Only yield if we haven't seen this tool call yet
-                                if tool_call_id not in tool_calls_made:
-                                    tool_calls_made.add(tool_call_id)
-                                    yield {
-                                        "type": "tool_call",
-                                        "content": tool_call.get("name", "unknown"),
-                                        "metadata": {
-                                            "args": tool_call.get("args", {}),
-                                            "id": tool_call_id
-                                        }
-                                    }
-                        
-                        # Handle tool results from tools node
-                        elif isinstance(message, ToolMessage):
-                            yield {
-                                "type": "tool_result",
-                                "content": str(message.content),
-                                "metadata": {
-                                    "tool_name": getattr(message, 'name', 'unknown'),
-                                    "tool_call_id": getattr(message, 'tool_call_id', '')
-                                }
-                            }
-                        
-                        # Handle final AI response (no tool calls)
-                        elif isinstance(message, AIMessage) and message.content:
+                        # Handle AI messages from agent node
+                        if isinstance(message, AIMessage) and node_name == "agent":
                             has_tool_calls = hasattr(message, 'tool_calls') and message.tool_calls
                             
-                            # Only treat as final response if from agent node and no tool calls
-                            if not has_tool_calls and node_name == "agent":
+                            # First, yield any reasoning/content before tool calls
+                            if message.content and has_tool_calls:
+                                yield {
+                                    "type": "reasoning",
+                                    "content": str(message.content),
+                                    "metadata": {}
+                                }
+                            
+                            # Then yield tool calls if present
+                            if has_tool_calls:
+                                is_final_response = False
+                                for tool_call in message.tool_calls:
+                                    tool_call_id = tool_call.get("id", "")
+                                    if tool_call_id not in tool_calls_made:
+                                        tool_calls_made.add(tool_call_id)
+                                        yield {
+                                            "type": "tool_call",
+                                            "content": tool_call.get("name", "unknown"),
+                                            "metadata": {
+                                                "args": tool_call.get("args", {}),
+                                                "id": tool_call_id
+                                            }
+                                        }
+                            # If no tool calls, this is the final response
+                            elif message.content:
                                 if not is_final_response:
                                     is_final_response = True
                                     yield {
@@ -461,6 +502,17 @@ class CodingAgent:
                                         "content": char,
                                         "metadata": {}
                                     }
+                        
+                        # Handle tool results from tools node
+                        elif isinstance(message, ToolMessage):
+                            yield {
+                                "type": "tool_result",
+                                "content": str(message.content),
+                                "metadata": {
+                                    "tool_name": getattr(message, 'name', 'unknown'),
+                                    "tool_call_id": getattr(message, 'tool_call_id', '')
+                                }
+                            }
 
     def get_memory_stats(self):
         """Get memory usage statistics"""
