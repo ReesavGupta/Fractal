@@ -30,12 +30,13 @@ def set_db_mcp(db_mcp):
     global _db_mcp_ref
     _db_mcp_ref = db_mcp
 
-def get_tool_list(include_db_tools: bool = False):
+def get_tool_list(include_db_tools: bool = False, read_only: bool = False):
     """
     Convert tool functions to LangChain tool objects with proper schemas.
     
     Args:
         include_db_tools: If True, include database MCP tools
+        read_only: If True, exclude write/edit/create tools (for /ask command)
     """
 
     @tool
@@ -210,18 +211,28 @@ def get_tool_list(include_db_tools: bool = False):
         except Exception as e:
             return f"Error searching memory: {str(e)}"
     
-    # Base tools
-    base_tools = [
+    # Base tools - read-only tools that are always available
+    read_only_tools = [
         read_file_tool,
-        write_file_tool,
         read_directory_tool,
-        edit_file_tool,
         search_files_tool,
-        create_directory_tool,
-        delete_file_tool,
         search_codebase_tool,
         search_memory_tool
     ]
+    
+    # Write/edit/create tools that are excluded in read-only mode
+    write_tools = [
+        write_file_tool,
+        edit_file_tool,
+        create_directory_tool,
+        delete_file_tool
+    ]
+    
+    # Choose tools based on read_only flag
+    if read_only:
+        base_tools = read_only_tools
+    else:
+        base_tools = read_only_tools + write_tools
     
     # Add database tools if requested and available
     if include_db_tools and _db_mcp_ref:

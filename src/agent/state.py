@@ -25,9 +25,9 @@ class IFractalState(BaseModel):
 
         if self.memory_manager:
             if isinstance(msg, HumanMessage):
-                self.memory_manager.add_entry(MessageType.USER_QUERY, msg.content, importance=0.9)
+                self.memory_manager.add_entry(MessageType.USER_QUERY, msg.content, importance=0.9) #type:ignore
             elif isinstance(msg, AIMessage):
-                self.memory_manager.add_entry(MessageType.AI_RESPONSE, msg.content, importance=0.8)
+                self.memory_manager.add_entry(MessageType.AI_RESPONSE, msg.content, importance=0.8) #type:ignore
 
     def get_recent_messages(self, n: int = 10) -> List[BaseMessage]:
         return self.messages[-n:]    

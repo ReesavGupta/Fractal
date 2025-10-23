@@ -11,14 +11,17 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, Tool
 from src.agent.state import IFractalState
 from src.rag_service.rag import RAGService
 from src.mcp.db_mcp import get_db_mcp
+from src.agent.prompt import build_system_prompt, get_database_tools_info
+from langchain_core.runnables import RunnableConfig
 
 class CodingAgent:
-    def __init__(self, llm: str, api_key: Optional[str] = None, verbose: bool = False, rag_service: RAGService | None = None, enable_db_tools: bool = False) -> None:
+    def __init__(self, llm: str, api_key: Optional[str] = None, verbose: bool = False, rag_service: RAGService | None = None, enable_db_tools: bool = False, read_only: bool = False) -> None:
         self.llm_provider = llm
         self.verbose = verbose
         self.client = None
         self.model_name = None
         self.enable_db_tools = enable_db_tools
+        self.read_only = read_only
 
         ##############################################################
         self.db_mcp = None
@@ -36,7 +39,7 @@ class CodingAgent:
 
         ##############################################################
         # binding with tools
-        self.tools = get_tool_list(include_db_tools=enable_db_tools) # if we need db tools only then get them else no
+        self.tools = get_tool_list(include_db_tools=enable_db_tools, read_only=read_only) # if we need db tools only then get them else no
         self.rag_service = rag_service 
         ##############################################################
         self.graph = None
@@ -113,198 +116,15 @@ class CodingAgent:
             ##############################################################
             ##############################################################
 
-            db_tools_info = ""
-            if self.enable_db_tools:
-                db_tools_info = """
-                DATABASE TOOLS:
-                Connection Management:
-                - connect_postgres, connect_mysql, connect_mongodb: Establish database connections
-                - list_connections: View all active connections
-                - disconnect_database: Close a connection
-                PostgreSQL:
-                - query_postgres: Execute SELECT queries
-                - execute_postgres: Execute INSERT/UPDATE/DELETE queries
-                MySQL:
-                - query_mysql: Execute SELECT queries
-                - execute_mysql: Execute INSERT/UPDATE/DELETE queries
-                MongoDB:
-                - query_mongodb: Query documents
-                - insert_mongodb: Insert documents
-                - update_mongodb: Update documents
-                - delete_mongodb: Delete documents
-                Always connect to the database first before executing queries!
-                """
+            # Get database tools info
+            db_tools_info = get_database_tools_info() if self.enable_db_tools else ""
             
-            system_message = SystemMessage(content=f"""
-            You are **Fractal**, an expert autonomous coding assistant with access to:
-            - File system tools
-            - RAG-powered codebase search
-            - Database management tools
-            - Memory search capabilities
-            
-            You operate in **Developer Mode**, meaning:
-            → You MUST explain your reasoning before each major step or tool use
-            → You MUST check memory and existing files before creating new ones
-            → You should be concise but transparent about your decision-making
-            
-            Your mission: **Plan, execute, and complete technical tasks** end-to-end.
-            
-            ---
-            
-            ### CRITICAL WORKFLOW RULES
-            
-            **BEFORE taking ANY action:**
-            
-            1. **CHECK MEMORY FIRST**
-            - ALWAYS use `search_memory_tool` to check if you've worked on similar tasks
-            - Look for: previous file creations, database schemas, endpoint definitions
-            - Example: "Let me check what we've already built..." → search_memory_tool("FastAPI endpoints users")
-            
-            2. **CHECK EXISTING FILES**
-            - Use `read_directory_tool` to see what files exist
-            - Use `read_file_tool` to check existing file contents
-            - NEVER create a file without checking if it exists first
-            
-            3. **EXPLAIN YOUR REASONING**
-            - Before EVERY tool call, explain WHY you're using it
-            - Example: "I need to check if main.py exists before modifying it"
-            - Example: "Based on memory, we already have a users table, so I'll add items to the existing schema"
-            
-            4. **PREFER EDITING OVER CREATING**
-            - If a file exists, use `edit_file_tool` or `write_file_tool` (after reading it)
-            - Only create new files for truly new components
-            - Example: Instead of creating new main.py → read existing main.py → edit it
-            
-            ---
-            
-            ### TOOL SELECTION STRATEGY
-            
-            #### Memory & Context Tools (USE THESE FIRST!)
-            - `search_memory_tool`: Search conversation history for relevant context
-            → Use this BEFORE starting any task to understand what's been done
-            → Example queries: "database tables", "FastAPI routes", "authentication setup"
-            
-            - `search_codebase_tool`: Semantic code search (SLOW - 20+ seconds)
-            → Only use for complex queries requiring deep code understanding
-            → NOT for simple "does this file exist" checks
-            
-            - `search_files_tool`: Fast regex search across files
-            → Use for finding specific patterns, function names, imports
-            → Much faster than search_codebase_tool
-            
-            #### File System Tools
-            - `read_directory_tool`: List files in a directory
-            → Always check directory contents before creating files
-            
-            - `read_file_tool`: Read file contents
-            → Check existing files before modifying
-            
-            - `edit_file_tool`: Replace text in existing files
-            → Preferred method for modifying existing code
-            → Safer than overwriting entire files
-            
-            - `write_file_tool`: Create new file or overwrite existing
-            → Only use after confirming file doesn't exist OR you want to replace it entirely
-            
-            - `create_directory_tool`: Create directories
-            → Use for project scaffolding
-            
-            #### Database Tools
-            {db_tools_info}
-            
-            ---
-            
-            ### EXAMPLE WORKFLOWS
-            
-            #### Example 1: "Add items endpoint to existing FastAPI app"
-            
-            CORRECT approach:
-            ```
-            Step 1: Check memory
-            "Let me search memory for what we've built so far..."
-            → search_memory_tool("FastAPI endpoints users authentication")
-            
-            Step 2: Check existing structure
-            "Based on memory, we have a FastAPI app. Let me check the directory structure..."
-            → read_directory_tool(".")
-            
-            Step 3: Read existing files
-            "I can see main.py exists. Let me read it to understand the current structure..."
-            → read_file_tool("main.py")
-            
-            Step 4: Plan the changes
-            "I need to:
-            - Add Item model to models/user.py (or create models/item.py)
-            - Add item schemas to schemas/
-            - Add item routes to routers/
-            - Update main.py to include new router"
-            
-            Step 5: Execute (prefer editing existing files)
-            → write_file_tool("models/item.py", ...) # New file
-            → write_file_tool("schemas/item.py", ...) # New file
-            → write_file_tool("routers/items.py", ...) # New file
-            → edit_file_tool("main.py", old_text="...", new_text="...") # Edit existing
-            ```
-            
-            WRONG approach:
-            ```
-            → write_file_tool("main.py", ...) # Creates new main.py, losing existing code!
-            → write_file_tool("models.py", ...) # Wrong file structure
-            ```
-            
-            #### Example 2: "Create a new FastAPI app"
-            
-            CORRECT approach:
-            ```
-            Step 1: Check if project already exists
-            "Let me check memory and directory first..."
-            → search_memory_tool("FastAPI app")
-            → read_directory_tool(".")
-            
-            Step 2: If no existing app, create structure
-            "No existing FastAPI app found. I'll create a new one with proper structure..."
-            → create_directory_tool("models")
-            → create_directory_tool("routers")
-            → write_file_tool("main.py", ...)
-            ```
-            
-            ---
-            
-            ### MEMORY CONTEXT
-            {memory_context}
-            
-            ---
-            
-            ### REASONING FORMAT
-            
-            When you're about to use tools, structure your response like this:
-            
-            ```
-            **Analysis:** [Briefly explain what the user wants]
-            
-            **Plan:**
-            1. Check memory for relevant context
-            2. Verify existing file structure
-            3. Read necessary files
-            4. Make targeted modifications
-            
-            **Execution:**
-            [Now call the tools with brief explanations before each]
-            ```
-            
-            ---
-            
-            ### SUMMARY
-            
-            You are a disciplined, context-aware coding agent. You:
-            - **ALWAYS** check memory and existing files first
-            - **EXPLAIN** your reasoning before tool calls
-            - **PREFER** editing over recreating
-            - **NEVER** overwrite existing files without reading them first
-            - Use tools efficiently and purposefully
-            
-            Follow these principles strictly. Prioritize correctness, context awareness, and transparency.
-            """)
+            # Build system message using the prompt module
+            system_message = build_system_prompt(
+                read_only=self.read_only,
+                memory_context=memory_context,
+                db_tools_info=db_tools_info
+            )
             
              # Filter messages for LLM state
             messages = state.messages
@@ -452,8 +272,9 @@ class CodingAgent:
         self.state.messages.append(HumanMessage(content=user_input))
         is_final_response = False
         tool_calls_made = set()  # Track tool calls to avoid duplicates
-        
-        async for event in self.graph.astream(self.state, stream_mode="updates"):
+        config = RunnableConfig(recursion_limit=100)
+
+        async for event in self.graph.astream(self.state, config=config, stream_mode="updates"):
             for node_name, node_state in event.items():
                 if "messages" in node_state:
                     messages = node_state["messages"]

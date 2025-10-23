@@ -87,6 +87,7 @@ class FractalAgent:
             '/llm', '/verbose', '/config', '/clear', '/help', '/quit',
             '/session', '/apikey', '/embedkey', '/reembed',
             '/dbtools', '/dbconnect', '/dblist', '/dbdisconnect',
+            '/ask',
             'openai', 'gemini', 'claude', 'postgresql', 'mysql', 'mongodb'
         ], ignore_case=True)
 
@@ -130,6 +131,9 @@ class FractalAgent:
 ├─────────────────────────────────────────────────────────────┤
 │ /llm <provider>    - Set LLM provider                       │
 │                      Options: openai, gemini, claude        │
+│─────────────────────────────────────────────────────────────│
+│ /ask <question>    - Ask questions about your codebase      │
+│                      (Read-only mode - no file changes)     │
 │─────────────────────────────────────────────────────────────│
 │ /verbose           - Toggle verbose output                  │
 │─────────────────────────────────────────────────────────────│
@@ -391,6 +395,72 @@ class FractalAgent:
                 else:
                     print("Re-indexing codebase...")
                     self.agent.rag_service.reembed_changed_files(project_path)
+
+        elif command == '/ask':
+            if not self.config['llm']:
+                print("Error: No LLM provider set. Use /llm <provider> to configure.")
+                return True
+            
+            if len(parts) < 2:
+                print("Error: Please specify what you would like to ask about your codebase")
+                print("Usage: /ask <your question>")
+                print("Example: /ask How does the authentication system work?")
+                return True
+            
+            # Extract the query from the command
+            query = " ".join(parts[1:])
+            
+            try:
+                # Create a read-only agent for this query
+                print(f"\n{Colors.CYAN}Analyzing codebase for: {query}{Colors.RESET}")
+                
+                # Initialize read-only agent
+                read_only_agent = CodingAgent(
+                    llm=self.config['llm'],
+                    api_key=self.config['api_keys'].get(self.config['llm']),
+                    verbose=self.config['verbose'],
+                    rag_service=self.rag_service,
+                    enable_db_tools=self.config['enable_db_tools'],
+                    read_only=True
+                )
+                
+                # Process the query with streaming
+                response_started = False
+                
+                async for event in read_only_agent.astream(query):
+                    event_type = event.get("type")
+                    content = event.get("content", "")
+                    metadata = event.get("metadata", {})
+                    
+                    if event_type == "reasoning":
+                        self.print_reasoning(content)
+                    
+                    elif event_type == "tool_call":
+                        tool_name = content
+                        args = metadata.get("args", {})
+                        self.print_tool_call(tool_name, args)
+                    
+                    elif event_type == "tool_result":
+                        # Don't display tool results - only tool calls
+                        pass
+                    
+                    elif event_type == "response_start":
+                        if not response_started:
+                            self.print_response_start()
+                            response_started = True
+                    
+                    elif event_type == "response_token":
+                        sys.stdout.write(f"{Colors.RESET}{content}")
+                        sys.stdout.flush()
+                
+                if response_started:
+                    print()
+                
+            except Exception as e:
+                print(f"\n{Colors.RED}Error processing /ask request: {str(e)}{Colors.RESET}\n")
+                if self.config['verbose']:
+                    import traceback
+                    traceback.print_exc()
 
         elif not command.startswith('/'):
             # Process user query through agent with streaming
