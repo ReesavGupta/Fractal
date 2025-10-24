@@ -48,7 +48,7 @@ def _filtered_showwarning(message, category, filename, lineno, file=None, line=N
 
 warnings.showwarning = _filtered_showwarning
 
-from src.agent.tui import FractalAgent
+from .tui import FractalAgent
 from dotenv import load_dotenv
 # import nest_asyncio
 

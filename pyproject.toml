@@ -1,24 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "fractal"
 version = "0.1.0"
-description = "Add your description here"
+description = "Fractal CLI Agent - An intelligent coding assistant with memory and database integration"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    {name = "Reesav Gupta", email = "dev.reesav@gmail.com"}
+]
+license = "MIT"
+keywords = ["ai", "cli", "coding", "assistant", "langchain", "agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "aiomysql>=0.2.0",
     "asyncpg>=0.30.0",
     "fastembed>=0.7.3",
     "fastmcp>=2.12.4",
     "google-genai>=1.41.0",
-    "langchain>=0.3.27",
-    "langchain-community>=0.3.30",
-    "langchain-google-genai>=2.1.12",
-    "langchain-google-vertexai>=2.1.2",
-    "langchain-nomic>=0.1.5",
-    "langchain-openai>=0.3.34",
-    "langchain-qdrant>=0.2.1",
-    "langgraph>=0.6.8",
-    "langsmith>=0.4.32",
+    "langchain==0.3.27",
+    "langchain-community==0.3.30",
+    "langchain-google-genai==2.1.12",
+    "langchain-google-vertexai==2.1.2",
+    "langchain-nomic==0.1.5",
+    "langchain-openai==0.3.34",
+    "langchain-qdrant==0.2.1",
+    "langgraph==0.6.8",
+    "langsmith==0.4.32",
     "motor>=3.7.1",
     "nest-asyncio>=1.6.0",
     "prompt-toolkit>=3.0.52",
@@ -26,3 +44,17 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "rank-bm25>=0.2.2",
 ]
+
+[project.scripts]
+fractal = "fractal.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ReesavGupta/Fractal"
+Repository = "https://github.com/ReesavGupta/Fractal"
+Issues = "https://github.com/ReesavGupta/Fractal/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fractal = ["public/*"]

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from qdrant_client import QdrantClient, models
 from langchain_community.retrievers import BM25Retriever

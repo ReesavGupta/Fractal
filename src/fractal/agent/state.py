@@ -1,6 +1,6 @@
 from datetime import datetime
-from src.agent.memory import MemoryManager, MessageType
-from src.agent.memory_filter import MessageFilter
+from .memory import MemoryManager, MessageType
+from .memory_filter import MessageFilter
 from pydantic import BaseModel, Field
 from typing import Optional, Annotated, List, Literal, Dict
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage

@@ -5,25 +5,20 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.completion import WordCompleter
-from src.agent.agent import CodingAgent
+from .agent import CodingAgent
 from dotenv import load_dotenv
-from src.rag_service.rag import RAGService
+from ..rag_service.rag import RAGService
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from pydantic import SecretStr
 from langchain.chat_models import init_chat_model
-from src.agent.utils import set_rag_service
+from .utils import set_rag_service
 from langchain_nomic import NomicEmbeddings
 
 load_dotenv()
 
-google_key = os.getenv("GOOGLE_EMBEDDING_API_KEY")
 nomic_key = os.getenv("NOMIC_EMBEDDING_API_KEY")
 
-if not nomic_key:
-    raise ValueError("no nomic api key set")
-if not google_key:
-    raise ValueError("no google api key set")
-
+# Don't raise error here - let user set it via / commands
 
 class Colors:
     """ANSI color codes"""
@@ -193,14 +188,19 @@ class FractalAgent:
             if not hasattr(self, 'rag_service') or not self.rag_service:
                 try:
                     embed_key = self.config['embedding_api_keys'].get('gemini')
-                    google_api_key = google_key or embed_key
+                    google_api_key =  embed_key
 
-                    if google_api_key:
-                        embedding_model = NomicEmbeddings(
-                            nomic_api_key=nomic_key,
-                            dimensionality=768,
-                            model="nomic-embed-text-v1.5"
-                        )
+                    if google_api_key and nomic_key:
+                        try:
+                            embedding_model = NomicEmbeddings(
+                                nomic_api_key=nomic_key,
+                                dimensionality=768,
+                                model="nomic-embed-text-v1.5"
+                            )
+                        except Exception as e:
+                            print(f"Warning: Could not initialize Nomic embeddings: {e}")
+                            print("Please set NOMIC_EMBEDDING_API_KEY environment variable or use /setkey command")
+                            return
 
                         temp_llm = init_chat_model(
                             "gpt-4o", 

@@ -1,5 +1,5 @@
 from typing import Dict, Any
-from src.agent.memory import MemoryManager, MessageType
+from .memory import MemoryManager, MessageType
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 
 class MessageFilter:
